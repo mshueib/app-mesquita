@@ -5,11 +5,13 @@ import 'package:intl/intl.dart';
 class AdminPanelPage extends StatefulWidget {
   final DatabaseReference dbRef;
   final Map<String, dynamic> dadosAtuais;
+  final VoidCallback onLogout;
 
   const AdminPanelPage({
     super.key,
     required this.dbRef,
     required this.dadosAtuais,
+    required this.onLogout,
   });
 
   @override
@@ -17,33 +19,24 @@ class AdminPanelPage extends StatefulWidget {
 }
 
 class _AdminPanelPageState extends State<AdminPanelPage> {
-  final Map<String, TextEditingController> _ctrls = {};
-  String? _mesSel;
-  String? _diaSel;
+  final Map<String, TextEditingController> _ctrl = {};
 
-  final List<String> _meses = [
-    "Muharram",
-    "Safar",
-    "Rabi' al-Awwal",
-    "Rabi' al-Thani",
-    "Jumada al-Ula",
-    "Jumada al-Akhira",
-    "Rajab",
-    "Sha'ban",
-    "Ramadhan",
-    "Shawwal",
-    "Dhu al-Qi'dah",
-    "Dhu al-Hijjah"
-  ];
+  final List<Map<String, dynamic>> _avisos = [];
 
   @override
   void initState() {
     super.initState();
-    _reset();
+    _inicializarCampos();
+    _carregarAvisos();
   }
 
-  void _reset() {
+  void _inicializarCampos() {
     final campos = [
+      'mes_islamico',
+      'ano_islamico',
+      'jejum',
+      'sehri',
+      'iftar',
       'fajr_azan',
       'fajr_namaz',
       'dhuhr_azan',
@@ -54,75 +47,132 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
       'maghrib_namaz',
       'isha_azan',
       'isha_namaz',
-      'orador_jummah',
-      'aviso_geral',
-      'prazo_geral',
-      'aviso_janazah',
-      'prazo_janazah',
-      'sehri',
-      'iftar',
-      'ano_islamico'
     ];
 
-    for (var k in campos) {
-      _ctrls[k] = TextEditingController(
-        text: widget.dadosAtuais[k]?.toString() ?? "",
+    for (var c in campos) {
+      _ctrl[c] = TextEditingController(
+        text: widget.dadosAtuais[c]?.toString() ?? "",
       );
-    }
-
-    String mesBanco =
-        widget.dadosAtuais['mes_islamico']?.toString() ?? "Ramadhan";
-
-    _mesSel = _meses.firstWhere(
-      (m) => m.toLowerCase() == mesBanco.toLowerCase(),
-      orElse: () => "Ramadhan",
-    );
-
-    _diaSel = widget.dadosAtuais['jejum']?.toString() ?? "1";
-
-    if (int.tryParse(_diaSel!) == null || int.parse(_diaSel!) > 30) {
-      _diaSel = "1";
     }
   }
 
-  Future<void> _pickData(String k) async {
-    DateTime? d = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime(2030),
-    );
+  void _carregarAvisos() {
+    if (widget.dadosAtuais.containsKey('avisos')) {
+      Map avisosMap =
+          Map<String, dynamic>.from(widget.dadosAtuais['avisos'] ?? {});
 
-    if (d != null) {
-      setState(() {
-        _ctrls[k]?.text = DateFormat('yyyy-MM-dd').format(d);
+      avisosMap.forEach((key, value) {
+        _avisos.add({
+          'id': key,
+          'tipo': value['tipo'],
+          'texto': value['texto'],
+          'prazo': value['prazo'],
+        });
       });
     }
   }
 
-  void _salvar() async {
-    Map<String, dynamic> up = {};
+  Future<void> _adicionarAvisoDialog() async {
+    String tipo = 'geral';
+    TextEditingController textoCtrl = TextEditingController();
+    TextEditingController prazoCtrl = TextEditingController();
 
-    _ctrls.forEach((k, v) => up[k] = v.text);
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Novo Aviso"),
+        content: SingleChildScrollView(
+          child: Column(
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: tipo,
+                items: const [
+                  DropdownMenuItem(value: 'geral', child: Text("Aviso Geral")),
+                  DropdownMenuItem(value: 'janazah', child: Text("Janazah")),
+                  DropdownMenuItem(value: 'nikah', child: Text("Nikah")),
+                ],
+                onChanged: (v) => tipo = v ?? 'geral',
+                decoration: const InputDecoration(labelText: "Tipo"),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: textoCtrl,
+                decoration: const InputDecoration(
+                  labelText: "Texto do Aviso",
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: prazoCtrl,
+                readOnly: true,
+                decoration: const InputDecoration(
+                  labelText: "Prazo",
+                  suffixIcon: Icon(Icons.calendar_today),
+                ),
+                onTap: () async {
+                  DateTime? data = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime(2035),
+                  );
+                  if (data != null) {
+                    prazoCtrl.text = DateFormat('yyyy-MM-dd').format(data);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancelar")),
+          ElevatedButton(
+            onPressed: () async {
+              await widget.dbRef.child('avisos').push().set({
+                'tipo': tipo,
+                'texto': textoCtrl.text,
+                'prazo': prazoCtrl.text,
+              });
+              Navigator.pop(context);
+              setState(() {});
+            },
+            child: const Text("Adicionar"),
+          ),
+        ],
+      ),
+    );
+  }
 
-    up['mes_islamico'] = _mesSel;
-    up['jejum'] = _diaSel;
+  Future<void> _removerAviso(String id) async {
+    await widget.dbRef.child('avisos').child(id).remove();
+    setState(() {
+      _avisos.removeWhere((a) => a['id'] == id);
+    });
+  }
 
-    await widget.dbRef.update(up);
+  Future<void> _gravar() async {
+    Map<String, dynamic> dados = {};
+    _ctrl.forEach((key, value) {
+      dados[key] = value.text;
+    });
+
+    await widget.dbRef.update(dados);
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
+        content: Text("Dados gravados com sucesso"),
         backgroundColor: Colors.green,
-        content: Text("Dados gravados no Firebase!"),
       ),
     );
   }
 
-  Widget _campo(String k, String label) {
+  Widget _campo(String key, String label) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: TextField(
-        controller: _ctrls[k],
+        controller: _ctrl[key],
         decoration: InputDecoration(
           labelText: label,
           border: const OutlineInputBorder(),
@@ -131,40 +181,34 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     );
   }
 
-  Widget _campoData(String k, String label) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: TextField(
-        controller: _ctrls[k],
-        readOnly: true,
-        onTap: () => _pickData(k),
-        decoration: InputDecoration(
-          labelText: label,
-          suffixIcon: const Icon(Icons.calendar_today),
-          border: const OutlineInputBorder(),
-        ),
-      ),
-    );
-  }
-
-  Widget _secao(String titulo, List<Widget> children) {
+  Widget _secao(String titulo, List<Widget> filhos) {
     return Card(
-      elevation: 2,
       margin: const EdgeInsets.only(bottom: 15),
       child: ExpansionTile(
         title: Text(
           titulo,
           style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF006400),
-          ),
+              fontWeight: FontWeight.bold, color: Color(0xFF0B3D2E)),
         ),
         children: [
           Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(children: children),
+            padding: const EdgeInsets.all(15),
+            child: Column(children: filhos),
           )
         ],
+      ),
+    );
+  }
+
+  Widget _buildAvisoItem(Map aviso) {
+    return Card(
+      child: ListTile(
+        title: Text(aviso['texto']),
+        subtitle: Text("${aviso['tipo']} • Expira: ${aviso['prazo']}"),
+        trailing: IconButton(
+          icon: const Icon(Icons.delete, color: Colors.red),
+          onPressed: () => _removerAviso(aviso['id']),
+        ),
       ),
     );
   }
@@ -174,31 +218,51 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Painel Administrativo"),
-        backgroundColor: const Color(0xFF006400),
+        backgroundColor: const Color(0xFF0B3D2E),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: widget.onLogout,
+          )
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _secao("Horários Salah", [
+          _secao("📢 Avisos", [
+            ElevatedButton.icon(
+              onPressed: _adicionarAvisoDialog,
+              icon: const Icon(Icons.add),
+              label: const Text("Adicionar Aviso"),
+            ),
+            const SizedBox(height: 10),
+            ..._avisos.map(_buildAvisoItem),
+          ]),
+          _secao("📅 Calendário", [
+            _campo('mes_islamico', "Mês Islâmico"),
+            _campo('ano_islamico', "Ano Hijri"),
+            _campo('jejum', "Dia"),
+            _campo('sehri', "Sehri"),
+            _campo('iftar', "Iftar"),
+          ]),
+          _secao("🕌 Horários de Salah", [
             _campo('fajr_azan', "Fajr Azan"),
-            _campo('fajr_namaz', "Fajr Namaz"),
+            _campo('fajr_namaz', "Fajr Jammah"),
             _campo('dhuhr_azan', "Dhuhr Azan"),
-            _campo('dhuhr_namaz', "Dhuhr Namaz"),
+            _campo('dhuhr_namaz', "Dhuhr Jammah"),
             _campo('asr_azan', "Asr Azan"),
-            _campo('asr_namaz', "Asr Namaz"),
+            _campo('asr_namaz', "Asr Jammah"),
             _campo('maghrib_azan', "Maghrib Azan"),
-            _campo('maghrib_namaz', "Maghrib Namaz"),
+            _campo('maghrib_namaz', "Maghrib Jammah"),
             _campo('isha_azan', "Isha Azan"),
-            _campo('isha_namaz', "Isha Namaz"),
-            _campo('orador_jummah', "Orador Jummah"),
+            _campo('isha_namaz', "Isha Jammah"),
           ]),
           const SizedBox(height: 20),
           ElevatedButton(
-            onPressed: _salvar,
+            onPressed: _gravar,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF006400),
-            ),
-            child: const Text("GRAVAR", style: TextStyle(color: Colors.white)),
+                backgroundColor: const Color(0xFF0B3D2E)),
+            child: const Text("GRAVAR"),
           ),
         ],
       ),

@@ -9,6 +9,7 @@ import 'package:flutter_vibrate/flutter_vibrate.dart';
 import 'services/notification_service.dart';
 import 'screens/admin_login_page.dart';
 import 'screens/admin_panel_page.dart';
+import 'models/aviso_model.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,17 +41,21 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   int _indiceAtual = 0;
   bool _isAdminAutenticado = false;
   Timer? _timer;
-
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+  late AnimationController _avisoAnimController;
+  late Animation<double> _avisoFade;
   String _tempoRestante = "";
   String _proximaOracaoNome = "";
   String _proximaOracaoHora = "";
   int _contadorTasbih = 0;
   bool _vibracaoAtiva = true;
-
+  final List<AvisoModel> _avisos = [];
+  List<Map<String, dynamic>> _listaAvisos = [];
   final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
     app: Firebase.app(),
     databaseURL:
@@ -62,8 +67,36 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+
     _ouvirNuvem();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+
+    _avisoAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.03).animate(
+      CurvedAnimation(
+        parent: _pulseController,
+        curve: Curves.easeInOut,
+      ),
+    );
+
+    _avisoFade = CurvedAnimation(
+      parent: _avisoAnimController,
+      curve: Curves.easeOut,
+    );
+
+    _pulseController.repeat(reverse: true);
+
+    // 🔥 UM ÚNICO TIMER
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
       _calcularCountdown();
     });
   }
@@ -71,18 +104,108 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _pulseController.dispose();
+    _avisoAnimController.dispose();
     super.dispose();
   }
 
   void _ouvirNuvem() {
     _dbRef.onValue.listen((event) {
       final value = event.snapshot.value;
-      if (value != null && value is Map) {
-        setState(() {
-          dados = Map<String, dynamic>.from(value);
+
+      if (value == null || value is! Map) return;
+
+      final dadosMap = Map<String, dynamic>.from(value);
+
+      List<Map<String, dynamic>> avisosTemp = [];
+
+      if (dadosMap['avisos'] is Map) {
+        final avisosMap = Map<String, dynamic>.from(dadosMap['avisos'] ?? {});
+
+        avisosMap.forEach((key, v) {
+          if (v is Map) {
+            avisosTemp.add({
+              'id': key,
+              'tipo': v['tipo'] ?? 'geral',
+              'texto': v['texto'] ?? '',
+              'prazo': v['prazo'] ?? '',
+            });
+          }
         });
+
+        avisosTemp = avisosTemp.reversed.toList();
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        dados = dadosMap;
+        _listaAvisos = avisosTemp;
+      });
+
+      // 🔥 Só animar se houver avisos
+      if (_listaAvisos.isNotEmpty) {
+        _avisoAnimController.forward(from: 0);
       }
     });
+  }
+
+  Future<void> _verificarMudancaDeDia() async {
+    if (dados.isEmpty) return;
+
+    final hoje = DateTime.now();
+    final hojeLimpo = DateTime(hoje.year, hoje.month, hoje.day);
+
+    String? ultimaDataStr = dados['ultima_data_jejum'];
+
+    if (ultimaDataStr == null || ultimaDataStr.isEmpty) {
+      await _dbRef.update({
+        'ultima_data_jejum': "${hoje.year.toString().padLeft(4, '0')}-"
+            "${hoje.month.toString().padLeft(2, '0')}-"
+            "${hoje.day.toString().padLeft(2, '0')}",
+      });
+      return;
+    }
+
+    DateTime ultimaData = DateTime.parse(ultimaDataStr);
+    DateTime ultimaLimpa =
+        DateTime(ultimaData.year, ultimaData.month, ultimaData.day);
+
+    int diferencaDias = hojeLimpo.difference(ultimaLimpa).inDays;
+
+    if (diferencaDias > 0) {
+      int diaAtual = int.tryParse(dados['jejum']?.toString() ?? "1") ?? 1;
+
+      int novoDia = diaAtual;
+
+      for (int i = 0; i < diferencaDias; i++) {
+        novoDia = novoDia < 30 ? novoDia + 1 : 1;
+      }
+
+      await _dbRef.update({
+        'jejum': novoDia.toString(),
+        'ultima_data_jejum': "${hoje.year.toString().padLeft(4, '0')}-"
+            "${hoje.month.toString().padLeft(2, '0')}-"
+            "${hoje.day.toString().padLeft(2, '0')}",
+      });
+    }
+  }
+
+  bool _avisoExpirado(String? prazo) {
+    if (prazo == null || prazo.isEmpty) return false;
+
+    try {
+      DateTime dataPrazo = DateTime.parse(prazo);
+      DateTime hoje = DateTime.now();
+
+      DateTime hojeLimpo = DateTime(hoje.year, hoje.month, hoje.day);
+      DateTime prazoLimpo =
+          DateTime(dataPrazo.year, dataPrazo.month, dataPrazo.day);
+
+      return hojeLimpo.isAfter(prazoLimpo);
+    } catch (e) {
+      return false;
+    }
   }
 
   void _calcularCountdown() {
@@ -133,12 +256,22 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final paginas = [
       _paginaInicio(),
-      const Center(child: Text("Avisos")),
+      _paginaAvisos(),
       _paginaTasbih(),
       _isAdminAutenticado
-          ? AdminPanelPage(dbRef: _dbRef, dadosAtuais: dados)
+          ? AdminPanelPage(
+              dbRef: _dbRef,
+              dadosAtuais: dados,
+              onLogout: () {
+                setState(() {
+                  _isAdminAutenticado = false;
+                  _indiceAtual = 0;
+                });
+              },
+            )
           : AdminLoginPage(
-              onSuccess: () => setState(() => _isAdminAutenticado = true)),
+              onSuccess: () => setState(() => _isAdminAutenticado = true),
+            ),
     ];
 
     return Scaffold(
@@ -172,7 +305,7 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          _cardAvisos(),
+          _cardAvisosPrincipal(),
           const SizedBox(height: 15),
           _cardProximaOracao(),
           const SizedBox(height: 15),
@@ -184,75 +317,319 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _cardAvisos() {
-    String aviso = dados['aviso_geral']?.toString() ?? "";
-
-    if (aviso.trim().isEmpty) {
-      aviso = "Sem avisos no momento";
+  Widget _cardAvisosPrincipal() {
+    if (_listaAvisos.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE8F5E9),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: const Center(
+          child: Text(
+            "Sem avisos no momento",
+            style: TextStyle(
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF0B3D2E),
+            ),
+          ),
+        ),
+      );
     }
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
-      decoration: BoxDecoration(
-        color: const Color(0xFFEFD27A),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Text(
-        aviso,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF3E2F00),
+    final aviso = _listaAvisos.first;
+
+    String tipo = (aviso['tipo'] ?? 'geral').toString();
+    String texto = (aviso['texto'] ?? '').toString();
+
+    Color corFundo = const Color(0xFFEFD27A);
+    Color corTitulo = const Color(0xFF3E2F00);
+    IconData icone = Icons.info_outline;
+
+    if (tipo == 'janazah') {
+      corFundo = const Color(0xFFFFEBEE);
+      corTitulo = const Color(0xFFB71C1C);
+      icone = Icons.campaign;
+    } else if (tipo == 'nikah') {
+      corFundo = const Color(0xFFDFF5E1);
+      corTitulo = const Color(0xFF0B3D2E);
+      icone = Icons.favorite;
+    }
+
+    final totalExtras = _listaAvisos.length - 1;
+
+    return FadeTransition(
+      opacity: _avisoFade,
+      child: GestureDetector(
+        onTap: () => setState(() => _indiceAtual = 1),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: corFundo,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black12,
+                blurRadius: 8,
+                offset: Offset(0, 4),
+              )
+            ],
+          ),
+          child: Row(
+            children: [
+              Icon(icone, color: corTitulo, size: 28),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          tipo.toUpperCase(),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: corTitulo,
+                          ),
+                        ),
+                        if (totalExtras > 0) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: corTitulo.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              "+$totalExtras",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: corTitulo,
+                              ),
+                            ),
+                          ),
+                        ]
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      texto,
+                      style: const TextStyle(fontSize: 15, height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _cardProximaOracao() {
+  Widget _buildAvisoBox({
+    required String titulo,
+    required String texto,
+    required Color corFundo,
+    required Color corTexto,
+    required IconData icone,
+  }) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 4), // MENOR
-      padding:
-          const EdgeInsets.symmetric(vertical: 18, horizontal: 22), // REDUZIDO
+      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF0B3D2E), Color(0xFF145A32)],
-        ),
-        borderRadius: BorderRadius.circular(20), // antes maior
+        color: corFundo,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          )
+        ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "Próxima Oração",
-            style: TextStyle(color: Colors.white70, fontSize: 16),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _proximaOracaoNome,
-            style: const TextStyle(
-              color: Color(0xFFD4AF37),
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
+          Icon(icone, color: corTexto, size: 26),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (titulo.isNotEmpty)
+                  Text(
+                    titulo,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: corTexto,
+                    ),
+                  ),
+                if (titulo.isNotEmpty) const SizedBox(height: 4),
+                Text(
+                  texto,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: corTexto,
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _proximaOracaoHora,
-            style: const TextStyle(
-              fontSize: 35,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFFD4AF37),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            "Faltam $_tempoRestante",
-            style: const TextStyle(color: Colors.white, fontSize: 15),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _paginaAvisos() {
+    if (_listaAvisos.isEmpty) {
+      return const Center(
+        child: Text(
+          "Sem avisos disponíveis",
+          style: TextStyle(
+            fontSize: 16,
+            color: Color(0xFF0B3D2E),
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _listaAvisos.length,
+      itemBuilder: (context, index) {
+        final aviso = _listaAvisos[index];
+
+        Color corFundo = const Color.fromARGB(255, 242, 242, 43);
+        Color corTitulo = const Color.fromARGB(255, 10, 10, 0);
+        IconData icone = Icons.info_outline;
+
+        if (aviso['tipo'] == 'janazah') {
+          corFundo = const Color(0xFFFFEBEE);
+          corTitulo = const Color(0xFFB71C1C);
+          icone = Icons.campaign;
+        } else if (aviso['tipo'] == 'nikah') {
+          corFundo = const Color(0xFFDFF5E1);
+          corTitulo = const Color(0xFF0B3D2E);
+          icone = Icons.favorite;
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: corFundo,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black12,
+                blurRadius: 8,
+                offset: Offset(0, 4),
+              )
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                icone,
+                color: corTitulo,
+                size: 28,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      aviso['tipo'].toString().toUpperCase(),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: corTitulo,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      aviso['texto'] ?? "",
+                      style: const TextStyle(
+                        fontSize: 15,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if ((aviso['prazo'] ?? "").toString().isNotEmpty)
+                      Text(
+                        "Expira: ${aviso['prazo']}",
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black54,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _cardProximaOracao() {
+    return ScaleTransition(
+      scale: _pulseAnimation,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [
+              Color(0xFF0B3D2E),
+              Color(0xFF1E6B3C),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Column(
+          children: [
+            const Text(
+              "Próxima Oração",
+              style: TextStyle(color: Colors.white70, fontSize: 16),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _proximaOracaoNome,
+              style: const TextStyle(
+                color: Color(0xFFD4AF37),
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _proximaOracaoHora,
+              style: const TextStyle(
+                color: Color(0xFFD4AF37),
+                fontSize: 44,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              "Faltam $_tempoRestante",
+              style: const TextStyle(color: Colors.white),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -513,7 +890,7 @@ class _HomePageState extends State<HomePage> {
                     "Vibração",
                     style: TextStyle(color: Colors.white),
                   ),
-                  activeColor: const Color(0xFFD4AF37),
+                  activeThumbColor: const Color(0xFFD4AF37),
                 ),
 
                 const SizedBox(height: 30),

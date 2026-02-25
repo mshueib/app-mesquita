@@ -3,6 +3,7 @@ import '../services/auth_service.dart';
 
 class AdminLoginPage extends StatefulWidget {
   final VoidCallback onSuccess;
+
   const AdminLoginPage({super.key, required this.onSuccess});
 
   @override
@@ -10,58 +11,56 @@ class AdminLoginPage extends StatefulWidget {
 }
 
 class _AdminLoginPageState extends State<AdminLoginPage> {
-  final TextEditingController _controller = TextEditingController();
-  int tentativas = 0;
-  bool bloqueado = false;
-  String? erro;
+  final TextEditingController _passwordController = TextEditingController();
+  String _erro = "";
 
   void _login() {
-    if (bloqueado) return;
+    bool sucesso = AuthService.login(_passwordController.text.trim());
 
-    if (AuthService.validate(_controller.text)) {
+    if (sucesso) {
       widget.onSuccess();
     } else {
-      tentativas++;
-      setState(() => erro = "Senha incorreta");
-
-      if (tentativas >= 3) {
-        bloqueado = true;
-        setState(() => erro = "Bloqueado por 30 segundos");
-
-        Future.delayed(const Duration(seconds: 30), () {
-          tentativas = 0;
-          bloqueado = false;
-          setState(() => erro = null);
-        });
-      }
+      setState(() {
+        _erro = "Senha incorreta";
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text("Área Administrativa"),
-            const SizedBox(height: 15),
-            TextField(
-              controller: _controller,
-              obscureText: true,
-              decoration: InputDecoration(
-                labelText: "Senha",
-                errorText: erro,
-              ),
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text(
+            "Acesso Administrativo",
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
             ),
-            const SizedBox(height: 15),
-            ElevatedButton(
-              onPressed: bloqueado ? null : _login,
-              child: const Text("Entrar"),
-            )
-          ],
-        ),
+          ),
+          const SizedBox(height: 20),
+          TextField(
+            controller: _passwordController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: "Senha",
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: _login,
+            child: const Text("Entrar"),
+          ),
+          const SizedBox(height: 10),
+          if (_erro.isNotEmpty)
+            Text(
+              _erro,
+              style: const TextStyle(color: Colors.red),
+            ),
+        ],
       ),
     );
   }
