@@ -53,6 +53,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _proximaOracaoNome = "";
   String _proximaOracaoHora = "";
   int _contadorTasbih = 0;
+  int _prioridadeAviso(String tipo) {
+    switch (tipo) {
+      case 'janazah':
+        return 0; // 🔥 mais importante
+      case 'nikah':
+        return 1;
+      case 'geral':
+      default:
+        return 2;
+    }
+  }
+
   bool _vibracaoAtiva = true;
   final List<AvisoModel> _avisos = [];
   List<Map<String, dynamic>> _listaAvisos = [];
@@ -134,6 +146,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         });
 
         avisosTemp = avisosTemp.reversed.toList();
+        avisosTemp.sort((a, b) =>
+            _prioridadeAviso(a['tipo']) - _prioridadeAviso(b['tipo']));
       }
 
       if (!mounted) return;
