@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "268973299952",
+    "project_id": "mesquita-40d71",
+    "storage_bucket": "mesquita-40d71.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:268973299952:android:7b6f87b347ec869cf8ca35",
+        "android_client_info": {
+          "package_name": "com.example.mesquita_quelimane"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCWi6Q5iGtMqY7hNDHyF9SG3pkWJ7eAD8U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
