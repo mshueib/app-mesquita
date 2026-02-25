@@ -52,6 +52,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _tempoRestante = "";
   String _proximaOracaoNome = "";
   String _proximaOracaoHora = "";
+  Map<String, dynamic> _horariosAntigos = {};
+  List<Map<String, dynamic>> _avisosAntigos = [];
   int _contadorTasbih = 0;
   int _prioridadeAviso(String tipo) {
     switch (tipo) {
@@ -149,6 +151,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         avisosTemp.sort((a, b) =>
             _prioridadeAviso(a['tipo']) - _prioridadeAviso(b['tipo']));
       }
+      _verificarMudancaHorarios(dadosMap);
+      _verificarNovoAviso(avisosTemp);
 
       if (!mounted) return;
 
@@ -220,6 +224,47 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     } catch (e) {
       return false;
     }
+  }
+
+  void _verificarMudancaHorarios(Map<String, dynamic> novosDados) {
+    final chaves = [
+      'fajr_azan',
+      'dhuhr_azan',
+      'asr_azan',
+      'maghrib_azan',
+      'isha_azan'
+    ];
+
+    for (var chave in chaves) {
+      if (_horariosAntigos[chave] != null &&
+          _horariosAntigos[chave] != novosDados[chave]) {
+        NotificationService.showNotification(
+          title: "Horário Atualizado",
+          body:
+              "Novo horário de ${chave.replaceAll('_azan', '')}: ${novosDados[chave]}",
+        );
+      }
+    }
+
+    _horariosAntigos = {for (var chave in chaves) chave: novosDados[chave]};
+  }
+
+  void _verificarNovoAviso(List<Map<String, dynamic>> novosAvisos) {
+    if (_avisosAntigos.isEmpty) {
+      _avisosAntigos = novosAvisos;
+      return;
+    }
+
+    if (novosAvisos.length > _avisosAntigos.length) {
+      final novo = novosAvisos.first;
+
+      NotificationService.showNotification(
+        title: "Novo Aviso",
+        body: "${novo['tipo'].toString().toUpperCase()}: ${novo['texto']}",
+      );
+    }
+
+    _avisosAntigos = novosAvisos;
   }
 
   void _calcularCountdown() {
