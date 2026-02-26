@@ -229,6 +229,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         "${data.day.toString().padLeft(2, '0')}";
   }
 
+  String _formatarDataHora(String dataIso) {
+    try {
+      DateTime data = DateTime.parse(dataIso).toLocal();
+
+      return "${data.day.toString().padLeft(2, '0')}/"
+          "${data.month.toString().padLeft(2, '0')}/"
+          "${data.year} "
+          "${data.hour.toString().padLeft(2, '0')}:"
+          "${data.minute.toString().padLeft(2, '0')}";
+    } catch (e) {
+      return "";
+    }
+  }
+
   void _verificarMudancaHorarios(Map<String, dynamic> novosDados) {
     final chaves = [
       'fajr_azan',
@@ -802,7 +816,30 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               dados['maghrib_namaz'] ?? "--:--"),
           _linha("Isha", dados['isha_azan'] ?? "--:--",
               dados['isha_namaz'] ?? "--:--"),
-
+          if (dados['ultima_atualizacao_salat'] != null &&
+              dados['ultima_atualizacao_salat'].toString().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.schedule,
+                    size: 14,
+                    color: Colors.grey,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    "Última atualização: ${_formatarDataHora(dados['ultima_atualizacao_salat'])}",
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           const SizedBox(height: 12),
         ],
       ),

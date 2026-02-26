@@ -153,11 +153,15 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
 
   Future<void> _gravar() async {
     Map<String, dynamic> dados = {};
+
     _ctrl.forEach((key, value) {
       dados[key] = value.text;
     });
 
     dados['orador_jummah'] = _oradorController.text;
+
+    // 🔥 ADICIONE ESTA LINHA
+    dados['ultima_atualizacao_salat'] = DateTime.now().toIso8601String();
 
     await widget.dbRef.update(dados);
 
