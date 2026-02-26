@@ -731,118 +731,163 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _tabelaSalat() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Column(
-        children: [
-          // ===== TÍTULO =====
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
-              color: Color(0xFF0B3D2E),
-              borderRadius: BorderRadius.vertical(
-                top: Radius.circular(22),
-              ),
-            ),
-            child: const Center(
-              child: Text(
-                "HORÁRIOS DE SALAT",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
+    return Column(
+      children: [
+        // ==============================
+        // TABELA PRINCIPAL SALAT
+        // ==============================
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(22),
           ),
+          child: Column(
+            children: [
+              // ===== TÍTULO =====
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF0B3D2E),
+                  borderRadius: BorderRadius.vertical(
+                    top: Radius.circular(22),
+                  ),
+                ),
+                child: const Center(
+                  child: Text(
+                    "HORÁRIOS DE SALAT",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
 
-          // ===== CABEÇALHO VERDE CLARO =====
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            color: const Color(0xFFE6F2ED), // 🔥 Verde claro suave
+              // ===== CABEÇALHO =====
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                color: const Color(0xFFE6F2ED),
+                child: Row(
+                  children: const [
+                    Expanded(
+                        child: Center(
+                            child: Text("Salat",
+                                style:
+                                    TextStyle(fontWeight: FontWeight.bold)))),
+                    Expanded(
+                        child: Center(
+                            child: Text("Azan",
+                                style:
+                                    TextStyle(fontWeight: FontWeight.bold)))),
+                    Expanded(
+                        child: Center(
+                            child: Text("Jammah",
+                                style:
+                                    TextStyle(fontWeight: FontWeight.bold)))),
+                  ],
+                ),
+              ),
+
+              _linha("Fajr", dados['fajr_azan'] ?? "--:--",
+                  dados['fajr_namaz'] ?? "--:--"),
+              _linha("Dhuhr", dados['dhuhr_azan'] ?? "--:--",
+                  dados['dhuhr_namaz'] ?? "--:--"),
+              _linha("Asr", dados['asr_azan'] ?? "--:--",
+                  dados['asr_namaz'] ?? "--:--"),
+              _linha("Maghrib", dados['maghrib_azan'] ?? "--:--",
+                  dados['maghrib_namaz'] ?? "--:--"),
+              _linha("Isha", dados['isha_azan'] ?? "--:--",
+                  dados['isha_namaz'] ?? "--:--"),
+
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+
+        // ==============================
+        // ÚLTIMA ATUALIZAÇÃO
+        // ==============================
+        if (dados['ultima_atualizacao_salat'] != null &&
+            dados['ultima_atualizacao_salat'].toString().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
             child: Row(
-              children: const [
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      "Salat",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0B3D2E),
-                      ),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      "Azan",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0B3D2E),
-                      ),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      "Jammah",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0B3D2E),
-                      ),
-                    ),
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.schedule, size: 14, color: Colors.grey),
+                const SizedBox(width: 6),
+                Text(
+                  "Última atualização: ${_formatarDataHora(dados['ultima_atualizacao_salat'])}",
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                    fontStyle: FontStyle.italic,
                   ),
                 ),
               ],
             ),
           ),
 
-          // ===== LINHAS =====
-          _linha("Fajr", dados['fajr_azan'] ?? "--:--",
-              dados['fajr_namaz'] ?? "--:--"),
-          _linha("Dhuhr", dados['dhuhr_azan'] ?? "--:--",
-              dados['dhuhr_namaz'] ?? "--:--"),
-          _linha("Asr", dados['asr_azan'] ?? "--:--",
-              dados['asr_namaz'] ?? "--:--"),
-          _linha("Maghrib", dados['maghrib_azan'] ?? "--:--",
-              dados['maghrib_namaz'] ?? "--:--"),
-          _linha("Isha", dados['isha_azan'] ?? "--:--",
-              dados['isha_namaz'] ?? "--:--"),
-          if (dados['ultima_atualizacao_salat'] != null &&
-              dados['ultima_atualizacao_salat'].toString().isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8, bottom: 12),
+        // ==============================
+        // PAINEL COMPLEMENTAR
+        // ==============================
+        if (dados['suhoor'] != null && dados['suhoor'].toString().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 18),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 6,
+                    offset: Offset(0, 4),
+                  )
+                ],
+              ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  const Icon(
-                    Icons.schedule,
-                    size: 14,
-                    color: Colors.grey,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    "Última atualização: ${_formatarDataHora(dados['ultima_atualizacao_salat'])}",
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
+                  _extraCol(Icons.nightlight_round, "Suhoor", dados['suhoor']),
+                  _extraCol(Icons.wb_sunny_outlined, "Nascer do Sol",
+                      dados['nascer_sol']),
+                  _extraCol(Icons.light_mode, "Ishraq", dados['ishraq']),
+                  _extraCol(Icons.schedule, "Zawwal", dados['zawwal']),
                 ],
               ),
             ),
-          const SizedBox(height: 12),
-        ],
-      ),
+          ),
+
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  Widget _extraCol(IconData icon, String label, String? value) {
+    return Column(
+      children: [
+        Icon(icon, color: const Color(0xFF0B3D2E)),
+        const SizedBox(height: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value ?? "--:--",
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF0B3D2E),
+          ),
+        ),
+      ],
     );
   }
 

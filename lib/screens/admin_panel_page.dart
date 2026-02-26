@@ -47,6 +47,12 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
       'maghrib_namaz',
       'isha_azan',
       'isha_namaz',
+      'jummah_azan',
+      'jummah_namaz',
+      'suhoor',
+      'nascer_sol',
+      'ishraq',
+      'zawwal',
     ];
 
     for (var c in campos) {
@@ -362,6 +368,12 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
             _campo('maghrib_namaz', "Maghrib Jammah"),
             _campo('isha_azan', "Isha Azan"),
             _campo('isha_namaz', "Isha Jammah"),
+          ]),
+          _secao("🌅 Horários Complementares", [
+            _campo('suhoor', "Suhoor"),
+            _campo('nascer_sol', "Nascer do Sol"),
+            _campo('ishraq', "Ishraq"),
+            _campo('zawwal', "Zawwal"),
           ]),
           const SizedBox(height: 20),
           Row(
