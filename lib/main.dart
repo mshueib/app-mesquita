@@ -579,7 +579,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (orador.trim().isNotEmpty) {
       cards.add(
         _buildAvisoBox(
-          titulo: "ORADOR DE JUMU'AH",
+          titulo: "ORADOR DE JUMMAH",
           texto: orador,
           corFundo: const Color(0xFFE3F2FD), // dourado leve premium
           corTexto: const Color(0xFF0D47A1), // dourado escuro elegante
@@ -782,7 +782,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                     TextStyle(fontWeight: FontWeight.bold)))),
                     Expanded(
                         child: Center(
-                            child: Text("Jammah",
+                            child: Text("Iqámat",
                                 style:
                                     TextStyle(fontWeight: FontWeight.bold)))),
                   ],
@@ -799,6 +799,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   dados['maghrib_namaz'] ?? "--:--"),
               _linha("Isha", dados['isha_azan'] ?? "--:--",
                   dados['isha_namaz'] ?? "--:--"),
+              _linha("Jummah", dados['jummah_azan'] ?? "--:--",
+                  dados['jummah_namaz'] ?? "--:--"),
 
               const SizedBox(height: 12),
             ],
@@ -834,33 +836,74 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         // ==============================
         if (dados['suhoor'] != null && dados['suhoor'].toString().isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(top: 18),
+            padding: const EdgeInsets.only(top: 22),
             child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 18),
               decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
+                gradient: const LinearGradient(
+                  colors: [
+                    Color(0xFFFFFFFF),
+                    Color(0xFFF9F6EC),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: const Color(0xFFD4AF37), // 🔥 dourado premium
+                  width: 1.2,
+                ),
                 boxShadow: const [
                   BoxShadow(
                     color: Colors.black12,
-                    blurRadius: 6,
-                    offset: Offset(0, 4),
+                    blurRadius: 8,
+                    offset: Offset(0, 5),
                   )
                 ],
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+              child: Column(
                 children: [
-                  _extraCol(Icons.nightlight_round, "Suhoor", dados['suhoor']),
-                  _extraCol(Icons.wb_sunny_outlined, "Nascer do Sol",
-                      dados['nascer_sol']),
-                  _extraCol(Icons.light_mode, "Ishraq", dados['ishraq']),
-                  _extraCol(Icons.schedule, "Zawwal", dados['zawwal']),
+                  // 🔥 Separador dourado superior
+                  Container(
+                    width: 60,
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD4AF37),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _extraColPremium(
+                        Icons.nights_stay,
+                        "Suhoor",
+                        dados['suhoor'],
+                      ),
+
+                      _extraColPremium(
+                        Icons.wb_sunny,
+                        "Nascer do Sol",
+                        dados['nascer_sol'],
+                      ),
+
+                      _extraColPremium(
+                        Icons.brightness_high,
+                        "Ishraq",
+                        dados['ishraq'],
+                      ),
+
+                      // 🔥 Zawwal DESTACADO
+                      _extraZawwal(
+                        dados['zawwal'],
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
           ),
-
         const SizedBox(height: 20),
       ],
     );
@@ -888,6 +931,73 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _extraColPremium(IconData icon, String label, String? value) {
+    return Column(
+      children: [
+        Icon(
+          icon,
+          color: const Color(0xFF0B3D2E),
+          size: 26,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: Color(0xFF444444),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value ?? "--:--",
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF0B3D2E),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _extraZawwal(String? value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFD4AF37).withOpacity(0.15),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.schedule,
+            color: Color(0xFFD4AF37),
+            size: 26,
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            "Zawwal",
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF8B6F00),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value ?? "--:--",
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF8B6F00),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -368,6 +368,8 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
             _campo('maghrib_namaz', "Maghrib Jammah"),
             _campo('isha_azan', "Isha Azan"),
             _campo('isha_namaz', "Isha Jammah"),
+            _campo('jummah_azan', "Jummah Azan"),
+            _campo('jummah_namaz', "Jummah Khutbah / Salah"),
           ]),
           _secao("🌅 Horários Complementares", [
             _campo('suhoor', "Suhoor"),
