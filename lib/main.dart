@@ -235,36 +235,51 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       'isha_azan'
     ];
 
+    if (_horariosAntigos.isEmpty) {
+      _horariosAntigos = {
+        for (var chave in chaves) chave: novosDados[chave]?.toString() ?? ""
+      };
+      return;
+    }
+
     for (var chave in chaves) {
-      if (_horariosAntigos[chave] != null &&
-          _horariosAntigos[chave] != novosDados[chave]) {
+      String antigo = _horariosAntigos[chave]?.toString() ?? "";
+      String novo = novosDados[chave]?.toString() ?? "";
+
+      if (antigo != novo) {
         NotificationService.showNotification(
           title: "Horário Atualizado",
-          body:
-              "Novo horário de ${chave.replaceAll('_azan', '')}: ${novosDados[chave]}",
+          body: "${chave.replaceAll('_azan', '')}: $novo",
         );
       }
     }
 
-    _horariosAntigos = {for (var chave in chaves) chave: novosDados[chave]};
+    _horariosAntigos = {
+      for (var chave in chaves) chave: novosDados[chave]?.toString() ?? ""
+    };
   }
 
   void _verificarNovoAviso(List<Map<String, dynamic>> novosAvisos) {
     if (_avisosAntigos.isEmpty) {
-      _avisosAntigos = novosAvisos;
+      _avisosAntigos = List.from(novosAvisos);
       return;
     }
 
-    if (novosAvisos.length > _avisosAntigos.length) {
-      final novo = novosAvisos.first;
+    // Detectar aviso realmente novo pelo ID
+    for (var aviso in novosAvisos) {
+      bool jaExiste =
+          _avisosAntigos.any((antigo) => antigo['id'] == aviso['id']);
 
-      NotificationService.showNotification(
-        title: "Novo Aviso",
-        body: "${novo['tipo'].toString().toUpperCase()}: ${novo['texto']}",
-      );
+      if (!jaExiste) {
+        NotificationService.showNotification(
+          title: "Novo Aviso",
+          body: "${aviso['tipo'].toString().toUpperCase()}: ${aviso['texto']}",
+        );
+        break;
+      }
     }
 
-    _avisosAntigos = novosAvisos;
+    _avisosAntigos = List.from(novosAvisos);
   }
 
   void _calcularCountdown() {
