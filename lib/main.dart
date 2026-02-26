@@ -5,7 +5,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:overlay_support/overlay_support.dart';
 import 'dart:async';
 import 'firebase_options.dart';
-import 'package:flutter_vibrate/flutter_vibrate.dart';
+import 'package:flutter/services.dart';
 import 'services/notification_service.dart';
 import 'screens/admin_login_page.dart';
 import 'screens/admin_panel_page.dart';
@@ -53,8 +53,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _proximaOracaoNome = "";
   String _proximaOracaoHora = "";
   Map<String, dynamic> _horariosAntigos = {};
-  List<Map<String, dynamic>> _avisosAntigos = [];
-  List<String> _idsAvisosNotificados = [];
+  final List<Map<String, dynamic>> _avisosAntigos = [];
+  final List<String> _idsAvisosNotificados = [];
   int _contadorTasbih = 0;
   int _prioridadeAviso(String tipo) {
     switch (tipo) {
@@ -69,6 +69,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   bool _vibracaoAtiva = true;
+  // 🔥 ZAKAT
+  final TextEditingController _zakatController = TextEditingController();
+  double? _resultadoZakat;
   final List<AvisoModel> _avisos = [];
   List<Map<String, dynamic>> _listaAvisos = [];
   final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
@@ -121,6 +124,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _timer?.cancel();
     _pulseController.dispose();
     _avisoAnimController.dispose();
+    _zakatController.dispose();
     super.dispose();
   }
 
@@ -341,6 +345,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _paginaInicio(),
       _paginaAvisos(),
       _paginaTasbih(),
+      _paginaZakat(),
       _isAdminAutenticado
           ? AdminPanelPage(
               dbRef: _dbRef,
@@ -376,6 +381,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           BottomNavigationBarItem(icon: Icon(Icons.home), label: "Início"),
           BottomNavigationBarItem(icon: Icon(Icons.info), label: "Avisos"),
           BottomNavigationBarItem(icon: Icon(Icons.touch_app), label: "Tasbih"),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calculate),
+            label: "Zakat",
+          ),
           BottomNavigationBarItem(
               icon: Icon(Icons.admin_panel_settings), label: "Admin"),
         ],
@@ -835,76 +844,67 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         // PAINEL COMPLEMENTAR
         // ==============================
         if (dados['suhoor'] != null && dados['suhoor'].toString().isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 22),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 18),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [
-                    Color(0xFFFFFFFF),
-                    Color(0xFFF9F6EC),
+          if (dados['suhoor'] != null && dados['suhoor'].toString().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 18),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF9F6EC),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: const Color(0xFFD4AF37),
+                    width: 1,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _extraCompact(
+                            Icons.nights_stay, "Suhoor", dados['suhoor']),
+                        _extraCompact(
+                            Icons.wb_sunny, "Nascer", dados['nascer_sol']),
+                        _extraCompact(
+                            Icons.brightness_high, "Ishraq", dados['ishraq']),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 8, horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD4AF37).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Column(
+                        children: [
+                          const Text(
+                            "Zawwal",
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF8B6F00),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            dados['zawwal'] ?? "--:--",
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF8B6F00),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(
-                  color: const Color(0xFFD4AF37), // 🔥 dourado premium
-                  width: 1.2,
-                ),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black12,
-                    blurRadius: 8,
-                    offset: Offset(0, 5),
-                  )
-                ],
-              ),
-              child: Column(
-                children: [
-                  // 🔥 Separador dourado superior
-                  Container(
-                    width: 60,
-                    height: 3,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFD4AF37),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _extraColPremium(
-                        Icons.nights_stay,
-                        "Suhoor",
-                        dados['suhoor'],
-                      ),
-
-                      _extraColPremium(
-                        Icons.wb_sunny,
-                        "Nascer do Sol",
-                        dados['nascer_sol'],
-                      ),
-
-                      _extraColPremium(
-                        Icons.brightness_high,
-                        "Ishraq",
-                        dados['ishraq'],
-                      ),
-
-                      // 🔥 Zawwal DESTACADO
-                      _extraZawwal(
-                        dados['zawwal'],
-                      ),
-                    ],
-                  ),
-                ],
               ),
             ),
-          ),
-        const SizedBox(height: 20),
       ],
     );
   }
@@ -1001,45 +1001,99 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _linha(String s, String a, String j, [bool h = false]) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      child: Row(
-        children: [
-          Expanded(
-            child: Center(
-              child: Text(
-                s,
-                style: TextStyle(
-                  fontSize: h ? 19 : 18,
-                  fontWeight: h ? FontWeight.bold : FontWeight.w500,
+  Widget _extraCompact(IconData icon, String label, String? value) {
+    return Column(
+      children: [
+        Icon(
+          icon,
+          size: 20,
+          color: const Color(0xFF0B3D2E),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Colors.black54,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value ?? "--:--",
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF0B3D2E),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _linha(String nome, String azan, String iqamah) {
+    bool isProxima = nome == _proximaOracaoNome;
+
+    double largura = MediaQuery.of(context).size.width;
+    bool telaPequena = largura < 360;
+
+    return AnimatedScale(
+      scale: isProxima ? 1.02 : 1.0,
+      duration: const Duration(milliseconds: 400),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 400),
+        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isProxima
+              ? const Color.fromARGB(255, 193, 170, 92).withOpacity(0.18)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: isProxima
+              ? Border.all(
+                  color: const Color(0xFFD4AF37),
+                  width: 1,
+                )
+              : null,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Center(
+                child: Text(
+                  nome,
+                  style: TextStyle(
+                    fontSize: telaPequena ? 15 : 17,
+                    fontWeight: isProxima ? FontWeight.bold : FontWeight.w500,
+                    color: isProxima ? const Color(0xFF0B3D2E) : Colors.black87,
+                  ),
                 ),
               ),
             ),
-          ),
-          Expanded(
-            child: Center(
-              child: Text(
-                a,
-                style: TextStyle(
-                  fontSize: h ? 19 : 18,
+            Expanded(
+              child: Center(
+                child: Text(
+                  azan,
+                  style: TextStyle(
+                    fontSize: telaPequena ? 15 : 17,
+                    color: Colors.black87,
+                  ),
                 ),
               ),
             ),
-          ),
-          Expanded(
-            child: Center(
-              child: Text(
-                j,
-                style: TextStyle(
-                  fontSize: h ? 19 : 18,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF0B3D2E),
+            Expanded(
+              child: Center(
+                child: Text(
+                  iqamah,
+                  style: TextStyle(
+                    fontSize: telaPequena ? 15 : 17,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF0B3D2E),
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1052,21 +1106,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _contadorTasbih++;
         });
 
-        if (_vibracaoAtiva) {
-          bool canVibrate = await Vibrate.canVibrate;
+        if (!_vibracaoAtiva) return;
 
-          if (canVibrate) {
-            Vibrate.feedback(FeedbackType.light);
-          }
-        }
+        // Vibração normal
+        HapticFeedback.lightImpact();
 
         // Vibração especial ao atingir 100
-        if (_contadorTasbih % 100 == 0 && _vibracaoAtiva) {
-          bool canVibrate = await Vibrate.canVibrate;
-
-          if (canVibrate) {
-            Vibrate.feedback(FeedbackType.heavy);
-          }
+        if (_contadorTasbih % 100 == 0) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          HapticFeedback.heavyImpact();
         }
       },
       child: Container(
@@ -1185,6 +1233,74 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _paginaZakat() {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text(
+            "Calculadora de Zakat",
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF0B3D2E),
+            ),
+          ),
+          const SizedBox(height: 20),
+          TextField(
+            controller: _zakatController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: "Valor total (MZN)",
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFD4AF37),
+              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+            ),
+            onPressed: () {
+              double valor = double.tryParse(
+                    _zakatController.text.replaceAll(',', '.'),
+                  ) ??
+                  0.0;
+
+              setState(() {
+                _resultadoZakat = valor * 0.025;
+              });
+            },
+            child: const Text(
+              "Calcular",
+              style: TextStyle(
+                color: Color(0xFF0B3D2E),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(height: 30),
+          if (_resultadoZakat != null)
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 400),
+              child: Text(
+                "Zakat a pagar: ${_resultadoZakat!.toStringAsFixed(2)} MZN",
+                key: ValueKey(_resultadoZakat),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0B3D2E),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

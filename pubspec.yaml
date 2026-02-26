@@ -22,7 +22,7 @@ dependencies:
   # Notifications
   flutter_local_notifications: ^20.1.0
   overlay_support: ^2.1.0
-  flutter_vibrate: ^1.3.0
+
 
   # Location
   geolocator: ^10.1.0

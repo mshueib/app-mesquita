@@ -286,7 +286,7 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
           _secao("📅 Calendário", [
             // 🔽 MÊS ISLÂMICO DROPDOWN
             DropdownButtonFormField<String>(
-              value: _ctrl['mes_islamico']!.text.isNotEmpty
+              initialValue: _ctrl['mes_islamico']!.text.isNotEmpty
                   ? _ctrl['mes_islamico']!.text
                   : null,
               items: const [
@@ -330,7 +330,7 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
 
             // 🔽 DIA 1–30 DROPDOWN
             DropdownButtonFormField<String>(
-              value:
+              initialValue:
                   _ctrl['jejum']!.text.isNotEmpty ? _ctrl['jejum']!.text : null,
               items: List.generate(
                 30,
