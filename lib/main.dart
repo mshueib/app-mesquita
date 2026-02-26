@@ -54,6 +54,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _proximaOracaoHora = "";
   Map<String, dynamic> _horariosAntigos = {};
   List<Map<String, dynamic>> _avisosAntigos = [];
+  List<String> _idsAvisosNotificados = [];
   int _contadorTasbih = 0;
   int _prioridadeAviso(String tipo) {
     switch (tipo) {
@@ -160,7 +161,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         dados = dadosMap;
         _listaAvisos = avisosTemp;
       });
-
+      _verificarMudancaDeDia();
       // 🔥 Só animar se houver avisos
       if (_listaAvisos.isNotEmpty) {
         _avisoAnimController.forward(from: 0);
@@ -178,9 +179,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     if (ultimaDataStr == null || ultimaDataStr.isEmpty) {
       await _dbRef.update({
-        'ultima_data_jejum': "${hoje.year.toString().padLeft(4, '0')}-"
-            "${hoje.month.toString().padLeft(2, '0')}-"
-            "${hoje.day.toString().padLeft(2, '0')}",
+        'ultima_data_jejum': _formatarData(hojeLimpo),
       });
       return;
     }
@@ -194,17 +193,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (diferencaDias > 0) {
       int diaAtual = int.tryParse(dados['jejum']?.toString() ?? "1") ?? 1;
 
-      int novoDia = diaAtual;
+      int novoDia = diaAtual + diferencaDias;
 
-      for (int i = 0; i < diferencaDias; i++) {
-        novoDia = novoDia < 30 ? novoDia + 1 : 1;
+      if (novoDia > 30) {
+        novoDia = ((novoDia - 1) % 30) + 1;
       }
 
       await _dbRef.update({
         'jejum': novoDia.toString(),
-        'ultima_data_jejum': "${hoje.year.toString().padLeft(4, '0')}-"
-            "${hoje.month.toString().padLeft(2, '0')}-"
-            "${hoje.day.toString().padLeft(2, '0')}",
+        'ultima_data_jejum': _formatarData(hojeLimpo),
       });
     }
   }
@@ -224,6 +221,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     } catch (e) {
       return false;
     }
+  }
+
+  String _formatarData(DateTime data) {
+    return "${data.year.toString().padLeft(4, '0')}-"
+        "${data.month.toString().padLeft(2, '0')}-"
+        "${data.day.toString().padLeft(2, '0')}";
   }
 
   void _verificarMudancaHorarios(Map<String, dynamic> novosDados) {
@@ -260,26 +263,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _verificarNovoAviso(List<Map<String, dynamic>> novosAvisos) {
-    if (_avisosAntigos.isEmpty) {
-      _avisosAntigos = List.from(novosAvisos);
-      return;
-    }
-
-    // Detectar aviso realmente novo pelo ID
     for (var aviso in novosAvisos) {
-      bool jaExiste =
-          _avisosAntigos.any((antigo) => antigo['id'] == aviso['id']);
+      String id = aviso['id'];
 
-      if (!jaExiste) {
+      if (!_idsAvisosNotificados.contains(id)) {
         NotificationService.showNotification(
           title: "Novo Aviso",
-          body: "${aviso['tipo'].toString().toUpperCase()}: ${aviso['texto']}",
+          body: aviso['texto'] ?? "",
         );
-        break;
+
+        _idsAvisosNotificados.add(id);
       }
     }
-
-    _avisosAntigos = List.from(novosAvisos);
   }
 
   void _calcularCountdown() {
@@ -562,99 +557,63 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _paginaAvisos() {
-    if (_listaAvisos.isEmpty) {
-      return const Center(
-        child: Text(
-          "Sem avisos disponíveis",
-          style: TextStyle(
-            fontSize: 16,
-            color: Color(0xFF0B3D2E),
-          ),
+    List<Widget> cards = [];
+
+    // 🕌 ORADOR JUMU'AH
+    String orador = dados['orador_jummah']?.toString() ?? "";
+
+    if (orador.trim().isNotEmpty) {
+      cards.add(
+        _buildAvisoBox(
+          titulo: "ORADOR DE JUMU'AH",
+          texto: orador,
+          corFundo: const Color(0xFFE3F2FD), // dourado leve premium
+          corTexto: const Color(0xFF0D47A1), // dourado escuro elegante
+          icone: Icons.mosque,
         ),
+      );
+
+      cards.add(const SizedBox(height: 16));
+    }
+
+    // 📢 OUTROS AVISOS
+    for (var aviso in _listaAvisos) {
+      Color corFundo = const Color(0xFFFFF8E1);
+      Color corTitulo = const Color(0xFF0B3D2E);
+      IconData icone = Icons.info_outline;
+
+      if (aviso['tipo'] == 'janazah') {
+        corFundo = const Color(0xFFFFEBEE);
+        corTitulo = const Color(0xFFB71C1C);
+        icone = Icons.campaign;
+      } else if (aviso['tipo'] == 'nikah') {
+        corFundo = const Color(0xFFDFF5E1);
+        corTitulo = const Color(0xFF0B3D2E);
+        icone = Icons.favorite;
+      }
+
+      cards.add(
+        _buildAvisoBox(
+          titulo: aviso['tipo'].toString().toUpperCase(),
+          texto: aviso['texto'] ?? "",
+          corFundo: corFundo,
+          corTexto: corTitulo,
+          icone: icone,
+        ),
+      );
+
+      cards.add(const SizedBox(height: 16));
+    }
+
+    if (cards.isEmpty) {
+      return const Center(
+        child: Text("Sem avisos disponíveis"),
       );
     }
 
-    return ListView.builder(
+    return ListView(
       padding: const EdgeInsets.all(16),
-      itemCount: _listaAvisos.length,
-      itemBuilder: (context, index) {
-        final aviso = _listaAvisos[index];
-
-        Color corFundo = const Color.fromARGB(255, 242, 242, 43);
-        Color corTitulo = const Color.fromARGB(255, 10, 10, 0);
-        IconData icone = Icons.info_outline;
-
-        if (aviso['tipo'] == 'janazah') {
-          corFundo = const Color(0xFFFFEBEE);
-          corTitulo = const Color(0xFFB71C1C);
-          icone = Icons.campaign;
-        } else if (aviso['tipo'] == 'nikah') {
-          corFundo = const Color(0xFFDFF5E1);
-          corTitulo = const Color(0xFF0B3D2E);
-          icone = Icons.favorite;
-        }
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: corFundo,
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black12,
-                blurRadius: 8,
-                offset: Offset(0, 4),
-              )
-            ],
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                icone,
-                color: corTitulo,
-                size: 28,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      aviso['tipo'].toString().toUpperCase(),
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: corTitulo,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      aviso['texto'] ?? "",
-                      style: const TextStyle(
-                        fontSize: 15,
-                        height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if ((aviso['prazo'] ?? "").toString().isNotEmpty)
-                      Text(
-                        "Expira: ${aviso['prazo']}",
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.black54,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+      children: cards,
     );
   }
 

@@ -19,8 +19,8 @@ class AdminPanelPage extends StatefulWidget {
 }
 
 class _AdminPanelPageState extends State<AdminPanelPage> {
+  final TextEditingController _oradorController = TextEditingController();
   final Map<String, TextEditingController> _ctrl = {};
-
   final List<Map<String, dynamic>> _avisos = [];
 
   @override
@@ -54,9 +54,13 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
         text: widget.dadosAtuais[c]?.toString() ?? "",
       );
     }
+
+    _oradorController.text =
+        widget.dadosAtuais['orador_jummah']?.toString() ?? "";
   }
 
   void _carregarAvisos() {
+    _avisos.clear();
     if (widget.dadosAtuais.containsKey('avisos')) {
       Map avisosMap =
           Map<String, dynamic>.from(widget.dadosAtuais['avisos'] ?? {});
@@ -81,48 +85,44 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Novo Aviso"),
-        content: SingleChildScrollView(
-          child: Column(
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: tipo,
-                items: const [
-                  DropdownMenuItem(value: 'geral', child: Text("Aviso Geral")),
-                  DropdownMenuItem(value: 'janazah', child: Text("Janazah")),
-                  DropdownMenuItem(value: 'nikah', child: Text("Nikah")),
-                ],
-                onChanged: (v) => tipo = v ?? 'geral',
-                decoration: const InputDecoration(labelText: "Tipo"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: tipo,
+              items: const [
+                DropdownMenuItem(value: 'geral', child: Text("Aviso Geral")),
+                DropdownMenuItem(value: 'janazah', child: Text("Janazah")),
+                DropdownMenuItem(value: 'nikah', child: Text("Nikah")),
+              ],
+              onChanged: (v) => tipo = v ?? 'geral',
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: textoCtrl,
+              decoration: const InputDecoration(labelText: "Texto do Aviso"),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: prazoCtrl,
+              readOnly: true,
+              decoration: const InputDecoration(
+                labelText: "Prazo",
+                suffixIcon: Icon(Icons.calendar_today),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: textoCtrl,
-                decoration: const InputDecoration(
-                  labelText: "Texto do Aviso",
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: prazoCtrl,
-                readOnly: true,
-                decoration: const InputDecoration(
-                  labelText: "Prazo",
-                  suffixIcon: Icon(Icons.calendar_today),
-                ),
-                onTap: () async {
-                  DateTime? data = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.now(),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime(2035),
-                  );
-                  if (data != null) {
-                    prazoCtrl.text = DateFormat('yyyy-MM-dd').format(data);
-                  }
-                },
-              ),
-            ],
-          ),
+              onTap: () async {
+                DateTime? data = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime.now(),
+                  firstDate: DateTime.now(),
+                  lastDate: DateTime(2035),
+                );
+                if (data != null) {
+                  prazoCtrl.text = DateFormat('yyyy-MM-dd').format(data);
+                }
+              },
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -136,7 +136,6 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
                 'prazo': prazoCtrl.text,
               });
               Navigator.pop(context);
-              setState(() {});
             },
             child: const Text("Adicionar"),
           ),
@@ -158,6 +157,8 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
       dados[key] = value.text;
     });
 
+    dados['orador_jummah'] = _oradorController.text;
+
     await widget.dbRef.update(dados);
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -168,14 +169,29 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     );
   }
 
+  void _descartarAlteracoes() {
+    setState(() {
+      _inicializarCampos();
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Alterações descartadas"),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
   Widget _campo(String key, String label) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: _ctrl[key],
         decoration: InputDecoration(
           labelText: label,
-          border: const OutlineInputBorder(),
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         ),
       ),
     );
@@ -216,12 +232,16 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF4F1EA),
       appBar: AppBar(
-        title: const Text("Painel Administrativo"),
         backgroundColor: const Color(0xFF0B3D2E),
+        title: const Text(
+          "Painel Administrativo",
+          style: TextStyle(color: Colors.white),
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.logout, color: Colors.white),
             onPressed: widget.onLogout,
           )
         ],
@@ -234,14 +254,96 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
               onPressed: _adicionarAvisoDialog,
               icon: const Icon(Icons.add),
               label: const Text("Adicionar Aviso"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0B3D2E),
+              ),
             ),
             const SizedBox(height: 10),
             ..._avisos.map(_buildAvisoItem),
           ]),
+          _secao("👤 Orador de Jumu'ah", [
+            TextField(
+              controller: _oradorController,
+              decoration: InputDecoration(
+                labelText: "Nome do Orador",
+                filled: true,
+                fillColor: Colors.white,
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ]),
           _secao("📅 Calendário", [
-            _campo('mes_islamico', "Mês Islâmico"),
+            // 🔽 MÊS ISLÂMICO DROPDOWN
+            DropdownButtonFormField<String>(
+              value: _ctrl['mes_islamico']!.text.isNotEmpty
+                  ? _ctrl['mes_islamico']!.text
+                  : null,
+              items: const [
+                "Muharram",
+                "Safar",
+                "Rabi al-Awwal",
+                "Rabi al-Thani",
+                "Jumada al-Awwal",
+                "Jumada al-Thani",
+                "Rajab",
+                "Sha'ban",
+                "Ramadhan",
+                "Shawwal",
+                "Dhul Qa'dah",
+                "Dhul Hijjah",
+              ]
+                  .map((mes) => DropdownMenuItem(
+                        value: mes,
+                        child: Text(mes),
+                      ))
+                  .toList(),
+              onChanged: (v) {
+                _ctrl['mes_islamico']!.text = v ?? "";
+              },
+              decoration: InputDecoration(
+                labelText: "Mês Islâmico",
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            // 🔢 ANO
             _campo('ano_islamico', "Ano Hijri"),
-            _campo('jejum', "Dia"),
+
+            const SizedBox(height: 14),
+
+            // 🔽 DIA 1–30 DROPDOWN
+            DropdownButtonFormField<String>(
+              value:
+                  _ctrl['jejum']!.text.isNotEmpty ? _ctrl['jejum']!.text : null,
+              items: List.generate(
+                30,
+                (index) => DropdownMenuItem(
+                  value: (index + 1).toString(),
+                  child: Text((index + 1).toString()),
+                ),
+              ),
+              onChanged: (v) {
+                _ctrl['jejum']!.text = v ?? "";
+              },
+              decoration: InputDecoration(
+                labelText: "Dia",
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
             _campo('sehri', "Sehri"),
             _campo('iftar', "Iftar"),
           ]),
@@ -258,11 +360,31 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
             _campo('isha_namaz', "Isha Jammah"),
           ]),
           const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _gravar,
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0B3D2E)),
-            child: const Text("GRAVAR"),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _descartarAlteracoes,
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                  child: const Text(
+                    "DESCARTAR",
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _gravar,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0B3D2E),
+                  ),
+                  child: const Text("GRAVAR"),
+                ),
+              ),
+            ],
           ),
         ],
       ),
