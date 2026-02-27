@@ -1,27 +1,39 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 class NotificationService {
-  // 🔔 Instância do plugin
   static final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
-  // 🔧 Inicialização (VERSÃO 17+)
   static Future<void> initialize() async {
+    // 🔔 Pedir permissão (Android 13+ obrigatório)
+    await FirebaseMessaging.instance.requestPermission();
+
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 
     const InitializationSettings settings =
         InitializationSettings(android: androidSettings);
 
+    // 🔥 CORRETO PARA V17+
     await _notifications.initialize(
       settings: settings,
       onDidReceiveNotificationResponse: (NotificationResponse response) {
-        // Pode deixar vazio
+        // pode deixar vazio
       },
     );
+
+    // 🔥 FOREGROUND LISTENER
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      if (message.notification != null) {
+        showNotification(
+          title: message.notification!.title ?? "",
+          body: message.notification!.body ?? "",
+        );
+      }
+    });
   }
 
-  // 🔔 Mostrar notificação
   static Future<void> showNotification({
     required String title,
     required String body,
@@ -38,8 +50,9 @@ class NotificationService {
     const NotificationDetails details =
         NotificationDetails(android: androidDetails);
 
+    // 🔥 CORRETO PARA V17+
     await _notifications.show(
-      id: 0,
+      id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title: title,
       body: body,
       notificationDetails: details,

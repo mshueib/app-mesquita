@@ -22,7 +22,7 @@
             <!-- MANTER APENAS ESTA -->
             <meta-data
                 android:name="com.google.firebase.messaging.default_notification_channel_id"
-                android:value="avisos_geral" />
+                android:value="mesquita_channel" />
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
