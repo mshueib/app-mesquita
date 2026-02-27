@@ -53,6 +53,7 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
       'nascer_sol',
       'ishraq',
       'zawwal',
+      'nissab_valor',
     ];
 
     for (var c in campos) {
@@ -376,6 +377,9 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
             _campo('nascer_sol', "Nascer do Sol"),
             _campo('ishraq', "Ishraq"),
             _campo('zawwal', "Zawwal"),
+          ]),
+          _secao("💰 Zakat", [
+            _campo('nissab_valor', "Valor do Nissab (MZN)"),
           ]),
           const SizedBox(height: 20),
           Row(
