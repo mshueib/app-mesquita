@@ -90,6 +90,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   ).ref();
 
   Map<String, dynamic> dados = {};
+  // 🔔 Guardar horários antigos de Jammah
+  Map<String, String> _horariosJammahAntigos = {};
 
   @override
   void initState() {
@@ -169,6 +171,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _verificarNovoAviso(avisosTemp);
 
       if (!mounted) return;
+      _verificarMudancaJammah(dadosMap);
 
       setState(() {
         dados = dadosMap;
@@ -279,7 +282,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (antigo != novo) {
         NotificationService.showNotification(
           title: "Horário Atualizado",
-          body: "${chave.replaceAll('_azan', '')}: $novo",
+          body:
+              "${chave.replaceAll('_azan', '').toUpperCase()} agora às ${novosDados[chave]}",
         );
       }
     }
@@ -311,7 +315,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     Map<String, String> hrs = {
       "Fajr": dados['fajr_azan'] ?? "04:30",
-      "Dhuhr": dados['dhuhr_azan'] ?? "12:15",
+      "Zohr": dados['dhuhr_azan'] ?? "12:15",
       "Asr": dados['asr_azan'] ?? "15:45",
       "Maghrib": dados['maghrib_azan'] ?? "18:12",
       "Isha": dados['isha_azan'] ?? "19:30",
@@ -346,6 +350,35 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _tempoRestante =
           "${diff.inHours}h ${diff.inMinutes % 60}m ${diff.inSeconds % 60}s";
     });
+  }
+
+  void _verificarMudancaJammah(Map<String, dynamic> novosDados) {
+    final camposJammah = [
+      'fajr_namaz',
+      'dhuhr_namaz',
+      'asr_namaz',
+      'maghrib_namaz',
+      'isha_namaz',
+      'jummah_namaz',
+    ];
+
+    for (var campo in camposJammah) {
+      final novoValor = novosDados[campo]?.toString() ?? "";
+
+      if (_horariosJammahAntigos.containsKey(campo)) {
+        final antigoValor = _horariosJammahAntigos[campo];
+
+        if (antigoValor != novoValor && novoValor.isNotEmpty) {
+          NotificationService.showNotification(
+            title: "Iqamah Atualizada",
+            body:
+                "${campo.replaceAll('_namaz', '').toUpperCase()} agora às $novoValor",
+          );
+        }
+      }
+
+      _horariosJammahAntigos[campo] = novoValor;
+    }
   }
 
   @override
@@ -809,7 +842,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
               _linha("Fajr", dados['fajr_azan'] ?? "--:--",
                   dados['fajr_namaz'] ?? "--:--"),
-              _linha("Dhuhr", dados['dhuhr_azan'] ?? "--:--",
+              _linha("Zohr", dados['dhuhr_azan'] ?? "--:--",
                   dados['dhuhr_namaz'] ?? "--:--"),
               _linha("Asr", dados['asr_azan'] ?? "--:--",
                   dados['asr_namaz'] ?? "--:--"),
