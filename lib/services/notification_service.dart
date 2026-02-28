@@ -1,61 +1,69 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
-  static Future<void> initialize() async {
-    // 🔔 Pedir permissão (Android 13+ obrigatório)
-    await FirebaseMessaging.instance.requestPermission();
+  // ✅ CANAL ANDROID
+  static const AndroidNotificationChannel channel = AndroidNotificationChannel(
+    'mesquita_channel',
+    'Mesquita Notificações',
+    description: 'Canal principal da mesquita',
+    importance: Importance.max,
+  );
 
-    const AndroidInitializationSettings androidSettings =
+  // ✅ INICIALIZAÇÃO CORRETA PARA V17+
+  static Future<void> initialize() async {
+    const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    const InitializationSettings settings =
-        InitializationSettings(android: androidSettings);
-
-    // 🔥 CORRETO PARA V17+
-    await _notifications.initialize(
-      settings: settings,
-      onDidReceiveNotificationResponse: (NotificationResponse response) {
-        // pode deixar vazio
-      },
+    const initializationSettings = InitializationSettings(
+      android: androidSettings,
     );
 
-    // 🔥 FOREGROUND LISTENER
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      if (message.notification != null) {
-        showNotification(
-          title: message.notification!.title ?? "",
-          body: message.notification!.body ?? "",
-        );
-      }
-    });
+    await _notifications.initialize(
+      settings: initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        // ação ao tocar na notificação (opcional)
+      },
+      onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
+    );
+
+    final androidImplementation =
+        _notifications.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+
+    await androidImplementation?.createNotificationChannel(channel);
   }
 
+  // ✅ MOSTRAR NOTIFICAÇÃO (V17+)
   static Future<void> showNotification({
     required String title,
     required String body,
   }) async {
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
+    const androidDetails = AndroidNotificationDetails(
       'mesquita_channel',
-      'Mesquita Notifications',
-      channelDescription: 'Notificações da Mesquita Central de Quelimane',
+      'Mesquita Notificações',
+      channelDescription: 'Canal principal da mesquita',
       importance: Importance.max,
       priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
     );
 
-    const NotificationDetails details =
-        NotificationDetails(android: androidDetails);
+    const notificationDetails = NotificationDetails(android: androidDetails);
 
-    // 🔥 CORRETO PARA V17+
     await _notifications.show(
-      id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      id: 0,
       title: title,
       body: body,
-      notificationDetails: details,
+      notificationDetails: notificationDetails,
     );
   }
+}
+
+// 🔥 Necessário para background (obrigatório v17+)
+@pragma('vm:entry-point')
+void notificationTapBackground(NotificationResponse response) {
+  // Pode deixar vazio
 }

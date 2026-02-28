@@ -21,9 +21,27 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // 🔥 ESSENCIAL
   await NotificationService.initialize();
+
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  await FirebaseMessaging.instance.requestPermission();
+  NotificationSettings settings =
+      await FirebaseMessaging.instance.getNotificationSettings();
+
+  print("STATUS NOTIFICAÇÃO: ${settings.authorizationStatus}");
+
+  String? token = await FirebaseMessaging.instance.getToken();
+  print("🔥 TOKEN: $token");
+
+  await FirebaseMessaging.instance.subscribeToTopic("mesquita");
+
   runApp(const OverlaySupport.global(child: MesquitaApp()));
 }
 
@@ -87,7 +105,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     app: Firebase.app(),
     databaseURL:
         'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/',
-  ).ref();
+  ).ref("app");
 
   Map<String, dynamic> dados = {};
   // 🔔 Guardar horários antigos de Jammah
@@ -97,7 +115,29 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
 
+    // 🔥 TESTE SE A MENSAGEM ESTÁ A CHEGAR
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print("🔥🔥🔥 MENSAGEM RECEBIDA");
+      print("DATA: ${message.data}");
+      print("NOTIFICATION: ${message.notification?.title}");
+    });
+
     _ouvirNuvem();
+
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print("📩 Mensagem recebida em foreground");
+
+      if (message.notification != null) {
+        NotificationService.showNotification(
+          title: message.notification!.title ?? "Notificação",
+          body: message.notification!.body ?? "",
+        );
+      }
+    });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      print("📲 Notificação clicada");
+    });
 
     _pulseController = AnimationController(
       vsync: this,
@@ -143,14 +183,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _dbRef.onValue.listen((event) {
       final value = event.snapshot.value;
 
-      if (value == null || value is! Map) return;
+      if (value == null || value is! Map) {
+        setState(() {
+          dados = {};
+          _listaAvisos = [];
+        });
+        return;
+      }
 
       final dadosMap = Map<String, dynamic>.from(value);
 
       List<Map<String, dynamic>> avisosTemp = [];
 
-      if (dadosMap['avisos'] is Map) {
-        final avisosMap = Map<String, dynamic>.from(dadosMap['avisos'] ?? {});
+      if (dadosMap['avisos'] != null && dadosMap['avisos'] is Map) {
+        final avisosMap = Map<String, dynamic>.from(dadosMap['avisos']);
 
         avisosMap.forEach((key, v) {
           if (v is Map) {
@@ -162,62 +208,66 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             });
           }
         });
-
-        avisosTemp = avisosTemp.reversed.toList();
-        avisosTemp.sort((a, b) =>
-            _prioridadeAviso(a['tipo']) - _prioridadeAviso(b['tipo']));
       }
-      _verificarMudancaHorarios(dadosMap);
-      _verificarNovoAviso(avisosTemp);
 
-      if (!mounted) return;
-      _verificarMudancaJammah(dadosMap);
+      // 🔥 AQUI ESTÁ A CORREÇÃO
+      _verificarNovoAviso(avisosTemp);
 
       setState(() {
         dados = dadosMap;
         _listaAvisos = avisosTemp;
       });
-      _verificarMudancaDeDia();
-      // 🔥 Só animar se houver avisos
-      if (_listaAvisos.isNotEmpty) {
-        _avisoAnimController.forward(from: 0);
-      }
     });
   }
 
   Future<void> _verificarMudancaDeDia() async {
     if (dados.isEmpty) return;
 
-    final hoje = DateTime.now();
-    final hojeLimpo = DateTime(hoje.year, hoje.month, hoje.day);
+    final agora = DateTime.now();
+
+    // 🔥 Ler horário de Maghrib
+    String maghribStr = dados['maghrib_azan'] ?? "18:00";
+    List<String> partes = maghribStr.split(':');
+
+    if (partes.length != 2) return;
+
+    DateTime hojeMaghrib = DateTime(
+      agora.year,
+      agora.month,
+      agora.day,
+      int.parse(partes[0]),
+      int.parse(partes[1]),
+    );
+
+    // 🔥 Se ainda não chegou Maghrib → não muda
+    if (agora.isBefore(hojeMaghrib)) return;
+
+    // 🔥 Data base islâmica começa após Maghrib
+    DateTime dataIslamica = DateTime(agora.year, agora.month, agora.day);
 
     String? ultimaDataStr = dados['ultima_data_jejum'];
 
     if (ultimaDataStr == null || ultimaDataStr.isEmpty) {
       await _dbRef.update({
-        'ultima_data_jejum': _formatarData(hojeLimpo),
+        'ultima_data_jejum': _formatarData(dataIslamica),
       });
       return;
     }
 
     DateTime ultimaData = DateTime.parse(ultimaDataStr);
-    DateTime ultimaLimpa =
-        DateTime(ultimaData.year, ultimaData.month, ultimaData.day);
 
-    int diferencaDias = hojeLimpo.difference(ultimaLimpa).inDays;
-
-    if (diferencaDias > 0) {
+    if (ultimaData.isBefore(dataIslamica)) {
       int diaAtual = int.tryParse(dados['jejum']?.toString() ?? "1") ?? 1;
 
-      int novoDia = diaAtual + diferencaDias;
+      int novoDia = diaAtual + 1;
 
       if (novoDia > 30) {
-        novoDia = ((novoDia - 1) % 30) + 1;
+        novoDia = 1;
       }
 
       await _dbRef.update({
         'jejum': novoDia.toString(),
-        'ultima_data_jejum': _formatarData(hojeLimpo),
+        'ultima_data_jejum': _formatarData(dataIslamica),
       });
     }
   }
@@ -452,6 +502,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _cardAvisosPrincipal() {
+    if (dados.isEmpty) {
+      return const SizedBox(); // evita erro no primeiro carregamento
+    }
+
     if (_listaAvisos.isEmpty) {
       return Container(
         width: double.infinity,
@@ -474,8 +528,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     final aviso = _listaAvisos.first;
 
-    String tipo = (aviso['tipo'] ?? 'geral').toString();
-    String texto = (aviso['texto'] ?? '').toString();
+    String tipo = aviso['tipo'] ?? 'geral';
+    String texto = aviso['texto'] ?? '';
 
     Color corFundo = const Color(0xFFEFD27A);
     Color corTitulo = const Color(0xFF3E2F00);
@@ -491,75 +545,47 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       icone = Icons.favorite;
     }
 
-    final totalExtras = _listaAvisos.length - 1;
-
-    return FadeTransition(
-      opacity: _avisoFade,
-      child: GestureDetector(
-        onTap: () => setState(() => _indiceAtual = 1),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: corFundo,
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black12,
-                blurRadius: 8,
-                offset: Offset(0, 4),
-              )
-            ],
-          ),
-          child: Row(
-            children: [
-              Icon(icone, color: corTitulo, size: 28),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          tipo.toUpperCase(),
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: corTitulo,
-                          ),
-                        ),
-                        if (totalExtras > 0) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: corTitulo.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              "+$totalExtras",
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: corTitulo,
-                              ),
-                            ),
-                          ),
-                        ]
-                      ],
+    return GestureDetector(
+      onTap: () => setState(() => _indiceAtual = 1),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: corFundo,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black12,
+              blurRadius: 8,
+              offset: Offset(0, 4),
+            )
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(icone, color: corTitulo, size: 28),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tipo.toUpperCase(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: corTitulo,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      texto,
-                      style: const TextStyle(fontSize: 15, height: 1.4),
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    texto,
+                    style: const TextStyle(fontSize: 15, height: 1.4),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
