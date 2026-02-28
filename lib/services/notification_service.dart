@@ -52,6 +52,8 @@ class NotificationService {
     );
 
     const notificationDetails = NotificationDetails(android: androidDetails);
+    // 🔥 ID ÚNICO para não sobrepor notificações
+    final int id = DateTime.now().millisecondsSinceEpoch.remainder(100000);
 
     await _notifications.show(
       id: 0,

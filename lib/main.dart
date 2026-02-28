@@ -167,6 +167,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       _calcularCountdown();
+      _verificarMudancaDeDia();
     });
   }
 
@@ -211,6 +212,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
 
       // 🔥 AQUI ESTÁ A CORREÇÃO
+      _verificarNovoAviso(avisosTemp);
+      // _verificarMudancaHorarios(dadosMap);
+      // _verificarMudancaJammah(dadosMap);
       _verificarNovoAviso(avisosTemp);
 
       setState(() {
@@ -310,36 +314,36 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _verificarMudancaHorarios(Map<String, dynamic> novosDados) {
-    final chaves = [
-      'fajr_azan',
-      'dhuhr_azan',
-      'asr_azan',
-      'maghrib_azan',
-      'isha_azan'
-    ];
+    final chaves = {
+      'fajr_azan': 'Fajr',
+      'dhuhr_azan': 'Dhuhr',
+      'asr_azan': 'Asr',
+      'maghrib_azan': 'Maghrib',
+      'isha_azan': 'Isha',
+    };
 
     if (_horariosAntigos.isEmpty) {
       _horariosAntigos = {
-        for (var chave in chaves) chave: novosDados[chave]?.toString() ?? ""
+        for (var chave in chaves.keys)
+          chave: novosDados[chave]?.toString() ?? ""
       };
       return;
     }
 
-    for (var chave in chaves) {
-      String antigo = _horariosAntigos[chave]?.toString() ?? "";
+    for (var chave in chaves.keys) {
+      String antigo = _horariosAntigos[chave] ?? "";
       String novo = novosDados[chave]?.toString() ?? "";
 
-      if (antigo != novo) {
+      if (antigo != novo && novo.isNotEmpty) {
         NotificationService.showNotification(
-          title: "Horário Atualizado",
-          body:
-              "${chave.replaceAll('_azan', '').toUpperCase()} agora às ${novosDados[chave]}",
+          title: "🕌 Actualização de Horário",
+          body: "${chaves[chave]} - Azan actualizado para $novo",
         );
       }
     }
 
     _horariosAntigos = {
-      for (var chave in chaves) chave: novosDados[chave]?.toString() ?? ""
+      for (var chave in chaves.keys) chave: novosDados[chave]?.toString() ?? ""
     };
   }
 
@@ -403,16 +407,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _verificarMudancaJammah(Map<String, dynamic> novosDados) {
-    final camposJammah = [
-      'fajr_namaz',
-      'dhuhr_namaz',
-      'asr_namaz',
-      'maghrib_namaz',
-      'isha_namaz',
-      'jummah_namaz',
-    ];
+    final camposJammah = {
+      'fajr_namaz': 'Fajr',
+      'dhuhr_namaz': 'Dhuhr',
+      'asr_namaz': 'Asr',
+      'maghrib_namaz': 'Maghrib',
+      'isha_namaz': 'Isha',
+      'jummah_namaz': 'Jummah',
+    };
 
-    for (var campo in camposJammah) {
+    for (var campo in camposJammah.keys) {
       final novoValor = novosDados[campo]?.toString() ?? "";
 
       if (_horariosJammahAntigos.containsKey(campo)) {
@@ -420,9 +424,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
         if (antigoValor != novoValor && novoValor.isNotEmpty) {
           NotificationService.showNotification(
-            title: "Iqamah Atualizada",
-            body:
-                "${campo.replaceAll('_namaz', '').toUpperCase()} agora às $novoValor",
+            title: "🕌 Actualização de Horário",
+            body: "${camposJammah[campo]} - Iqamah actualizada para $novoValor",
           );
         }
       }
@@ -897,7 +900,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 const Icon(Icons.schedule, size: 14, color: Colors.grey),
                 const SizedBox(width: 6),
                 Text(
-                  "Última atualização: ${_formatarDataHora(dados['ultima_atualizacao_salat'])}",
+                  "Última actualização: ${_formatarDataHora(dados['ultima_atualizacao_salat'])}",
                   style: const TextStyle(
                     fontSize: 12,
                     color: Colors.grey,
