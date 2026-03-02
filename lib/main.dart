@@ -11,6 +11,11 @@ import 'services/notification_service.dart';
 import 'screens/admin_login_page.dart';
 import 'screens/admin_panel_page.dart';
 import 'models/aviso_model.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+import 'package:permission_handler/permission_handler.dart';
+import 'package:android_intent_plus/android_intent.dart';
+import 'screens/qibla_page.dart';
 
 // 🔥 HANDLER BACKGROUND
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -22,12 +27,25 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 🔥 INICIALIZAR TIMEZONE PRIMEIRO
+  tz.initializeTimeZones();
+  tz.setLocalLocation(tz.getLocation('Africa/Maputo'));
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
   // 🔥 ESSENCIAL
   await NotificationService.initialize();
+
+  await Permission.notification.request();
+
+  if (!await Permission.scheduleExactAlarm.isGranted) {
+    final intent = AndroidIntent(
+      action: 'android.settings.REQUEST_SCHEDULE_EXACT_ALARM',
+    );
+    await intent.launch();
+  }
 
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
@@ -41,6 +59,10 @@ void main() async {
   print("🔥 TOKEN: $token");
 
   await FirebaseMessaging.instance.subscribeToTopic("mesquita");
+
+  if (await Permission.scheduleExactAlarm.isDenied) {
+    await Permission.scheduleExactAlarm.request();
+  }
 
   runApp(const OverlaySupport.global(child: MesquitaApp()));
 }
@@ -71,6 +93,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   int _indiceAtual = 0;
   bool _isAdminAutenticado = false;
+  bool _azanJaAgendado = false;
   Timer? _timer;
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
@@ -109,7 +132,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Map<String, dynamic> dados = {};
   // 🔔 Guardar horários antigos de Jammah
-  Map<String, String> _horariosJammahAntigos = {};
+  final Map<String, String> _horariosJammahAntigos = {};
 
   @override
   void initState() {
@@ -123,7 +146,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     });
 
     _ouvirNuvem();
-
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print("📩 Mensagem recebida em foreground");
 
@@ -215,13 +237,60 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _verificarNovoAviso(avisosTemp);
       // _verificarMudancaHorarios(dadosMap);
       // _verificarMudancaJammah(dadosMap);
-      _verificarNovoAviso(avisosTemp);
 
       setState(() {
         dados = dadosMap;
         _listaAvisos = avisosTemp;
       });
+
+      if (!_azanJaAgendado) {
+        _azanJaAgendado = true; // 👈 PRIMEIRO define true
+        _agendarTodosAzan(dadosMap);
+      }
     });
+  }
+
+  Future<void> _agendarTodosAzan(Map<String, dynamic> dadosMap) async {
+    if (dadosMap.isEmpty) return;
+
+    print("🔥 A AGENDAR AZAN...");
+
+    final horarios = {
+      "Fajr": dadosMap['fajr_azan'],
+      "Dhuhr": dadosMap['dhuhr_azan'],
+      "Asr": dadosMap['asr_azan'],
+      "Maghrib": dadosMap['maghrib_azan'],
+      "Isha": dadosMap['isha_azan'],
+    };
+
+    int id = 500;
+
+    for (var entry in horarios.entries) {
+      final nome = entry.key;
+      final horaStr = entry.value;
+
+      if (horaStr == null) continue;
+
+      final partes = horaStr.toString().split(':');
+      if (partes.length != 2) continue;
+
+      final hour = int.tryParse(partes[0]) ?? 0;
+      final minute = int.tryParse(partes[1]) ?? 0;
+
+      if (hour < 0 || hour > 23) continue;
+      if (minute < 0 || minute > 59) continue;
+
+      id++;
+
+      print("🕌 Agendando $nome para $hour:$minute");
+
+      await NotificationService.scheduleAzan(
+        prayerName: nome,
+        hour: hour,
+        minute: minute,
+        id: id,
+      );
+    }
   }
 
   Future<void> _verificarMudancaDeDia() async {
@@ -441,6 +510,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _paginaAvisos(),
       _paginaTasbih(),
       _paginaZakat(),
+      const QiblaPage(),
       _isAdminAutenticado
           ? AdminPanelPage(
               dbRef: _dbRef,
@@ -480,6 +550,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             icon: Icon(Icons.calculate),
             label: "Zakat",
           ),
+          BottomNavigationBarItem(icon: Icon(Icons.explore), label: "Qibla"),
           BottomNavigationBarItem(
               icon: Icon(Icons.admin_panel_settings), label: "Admin"),
         ],
