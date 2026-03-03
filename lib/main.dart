@@ -16,6 +16,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'screens/qibla_page.dart';
+import 'screens/zakat_page.dart';
 
 // 🔥 HANDLER BACKGROUND
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -509,7 +510,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _paginaInicio(),
       _paginaAvisos(),
       _paginaTasbih(),
-      _paginaZakat(),
+      ZakatPage(
+        nissabAdmin:
+            double.tryParse(dados['nissab_valor']?.toString() ?? "0") ?? 0,
+      ),
       const QiblaPage(),
       _isAdminAutenticado
           ? AdminPanelPage(
@@ -1375,155 +1379,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _paginaZakat() {
-    String nissabStr = dados['nissab_valor']?.toString() ?? "0";
-    double nissab = double.tryParse(nissabStr) ?? 0.0;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 🔶 CARD NISSAB
-          _cardZakat(),
-
-          const SizedBox(height: 30),
-
-          const Text(
-            "Calculadora de Zakat",
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF0B3D2E),
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          TextField(
-            controller: _zakatController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: "Valor total (MZN)",
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFD4AF37),
-              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: () {
-              double valor = double.tryParse(
-                    _zakatController.text.replaceAll(',', '.'),
-                  ) ??
-                  0.0;
-
-              setState(() {
-                _resultadoZakat = valor * 0.025;
-              });
-            },
-            child: const Text(
-              "Calcular",
-              style: TextStyle(
-                color: Color(0xFF0B3D2E),
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 30),
-
-          if (_resultadoZakat != null)
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 400),
-              child: Column(
-                key: ValueKey(_resultadoZakat),
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Zakat a pagar: ${_resultadoZakat!.toStringAsFixed(2)} MZN",
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF0B3D2E),
-                    ),
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  // 🔥 Verificação contra Nissab
-                  if (double.tryParse(
-                          _zakatController.text.replaceAll(',', '.')) !=
-                      null)
-                    Text(
-                      double.parse(
-                                  _zakatController.text.replaceAll(',', '.')) >=
-                              nissab
-                          ? "✔ Você atingiu o Nissab"
-                          : "⚠ Valor abaixo do Nissab",
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: double.parse(_zakatController.text
-                                    .replaceAll(',', '.')) >=
-                                nissab
-                            ? Colors.green
-                            : Colors.red,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _cardZakat() {
-    String valor = dados['nissab_valor']?.toString() ?? "0";
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFFE8F5E9),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF0B3D2E)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "Zakat - Nissab Atual",
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF0B3D2E),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "$valor MZN",
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFFD4AF37),
-            ),
-          ),
-        ],
       ),
     );
   }
