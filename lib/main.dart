@@ -20,6 +20,7 @@ import 'screens/zakat_page.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'services/local_storage_service.dart';
 import 'dart:io';
+import 'screens/developer_page.dart';
 
 // 🔥 HANDLER BACKGROUND
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -616,6 +617,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           : AdminLoginPage(
               onSuccess: () => setState(() => _isAdminAutenticado = true),
             ),
+      const DeveloperPage(),
     ];
 
     return Scaffold(
@@ -673,6 +675,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           BottomNavigationBarItem(icon: Icon(Icons.explore), label: "Qibla"),
           BottomNavigationBarItem(
               icon: Icon(Icons.admin_panel_settings), label: "Admin"),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.info_outline),
+            label: "Sobre",
+          ),
         ],
       ),
     );

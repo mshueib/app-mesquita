@@ -1,8 +1,8 @@
 name: mesquita_quelimane
-description: "A new Flutter project."
+description: "Aplicativo oficial MosqueNow com horários de oração, notificações, Qibla, Zakat e recursos islâmicos."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -26,6 +26,8 @@ dependencies:
   permission_handler: ^11.3.1
   android_intent_plus: ^5.1.0
   connectivity_plus: ^5.0.2
+  package_info_plus: ^9.0.0
+  url_launcher: ^6.2.5
 
 
   # Location
@@ -62,3 +64,7 @@ flutter_icons:
 
 flutter:
   uses-material-design: true
+  
+  assets:
+    - assets/icon.png
+
