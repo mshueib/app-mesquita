@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class AdminLoginPage extends StatefulWidget {
   final VoidCallback onSuccess;
@@ -13,12 +14,22 @@ class AdminLoginPage extends StatefulWidget {
 class _AdminLoginPageState extends State<AdminLoginPage> {
   final TextEditingController _passwordController = TextEditingController();
   String _erro = "";
+  bool _mostrarSenha = false;
 
-  void _login() {
+  Future<void> _login() async {
     bool sucesso = AuthService.login(_passwordController.text.trim());
 
     if (sucesso) {
-      widget.onSuccess();
+      try {
+        // 🔐 Autenticar no Firebase (anónimo)
+        await FirebaseAuth.instance.signInAnonymously();
+
+        widget.onSuccess();
+      } catch (e) {
+        setState(() {
+          _erro = "Erro ao autenticar no servidor.";
+        });
+      }
     } else {
       setState(() {
         _erro = "Senha incorreta";
@@ -43,15 +54,27 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
           const SizedBox(height: 20),
           TextField(
             controller: _passwordController,
-            obscureText: true,
-            decoration: const InputDecoration(
+            obscureText: !_mostrarSenha,
+            decoration: InputDecoration(
               labelText: "Senha",
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _mostrarSenha ? Icons.visibility : Icons.visibility_off,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _mostrarSenha = !_mostrarSenha;
+                  });
+                },
+              ),
             ),
           ),
           const SizedBox(height: 20),
           ElevatedButton(
-            onPressed: _login,
+            onPressed: () async {
+              await _login();
+            },
             child: const Text("Entrar"),
           ),
           const SizedBox(height: 10),

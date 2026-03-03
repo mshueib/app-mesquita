@@ -22,7 +22,42 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
   final TextEditingController _oradorController = TextEditingController();
   final Map<String, TextEditingController> _ctrl = {};
   final List<Map<String, dynamic>> _avisos = [];
+  bool _horaMaiorOuIgual(String azan, String iqamah) {
+    try {
+      final azanPartes = azan.split(':');
+      final iqamahPartes = iqamah.split(':');
 
+      final azanMin = int.parse(azanPartes[0]) * 60 + int.parse(azanPartes[1]);
+
+      final iqamahMin =
+          int.parse(iqamahPartes[0]) * 60 + int.parse(iqamahPartes[1]);
+
+      return iqamahMin >= azanMin;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  final List<String> _camposHora = [
+    'sehri',
+    'iftar',
+    'fajr_azan',
+    'fajr_namaz',
+    'dhuhr_azan',
+    'dhuhr_namaz',
+    'asr_azan',
+    'asr_namaz',
+    'maghrib_azan',
+    'maghrib_namaz',
+    'isha_azan',
+    'isha_namaz',
+    'jummah_azan',
+    'jummah_namaz',
+    'suhoor',
+    'nascer_sol',
+    'ishraq',
+    'zawwal',
+  ];
   @override
   void initState() {
     super.initState();
@@ -159,6 +194,35 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
   }
 
   Future<void> _gravar() async {
+    // 🔥 VALIDAR AZAN vs IQAMAH
+
+    final validacoes = [
+      ['fajr_azan', 'fajr_namaz', 'Fajr'],
+      ['dhuhr_azan', 'dhuhr_namaz', 'Dhuhr'],
+      ['asr_azan', 'asr_namaz', 'Asr'],
+      ['maghrib_azan', 'maghrib_namaz', 'Maghrib'],
+      ['isha_azan', 'isha_namaz', 'Isha'],
+      ['jummah_azan', 'jummah_namaz', 'Jummah'],
+    ];
+
+    for (var v in validacoes) {
+      String azan = _ctrl[v[0]]?.text ?? "";
+      String iqamah = _ctrl[v[1]]?.text ?? "";
+
+      if (azan.isNotEmpty &&
+          iqamah.isNotEmpty &&
+          !_horaMaiorOuIgual(azan, iqamah)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "${v[2]}: Iqamah não pode ser antes do Azan",
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
     Map<String, dynamic> dados = {};
 
     _ctrl.forEach((key, value) {
@@ -194,15 +258,65 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
   }
 
   Widget _campo(String key, String label) {
+    bool isHora = _camposHora.contains(key);
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 14),
       child: TextField(
         controller: _ctrl[key],
+        readOnly: isHora, // 🔥 impede digitação manual
+        onTap: isHora
+            ? () async {
+                TimeOfDay agora = TimeOfDay.now();
+
+                TimeOfDay? escolhido = await showTimePicker(
+                  context: context,
+                  initialTime: agora,
+                  builder: (context, child) {
+                    return Theme(
+                      data: Theme.of(context).copyWith(
+                        colorScheme: const ColorScheme.light(
+                          primary: Color(0xFF0B3D2E),
+                          onPrimary: Colors.white,
+                          onSurface: Color(0xFF0B3D2E),
+                        ),
+                      ),
+                      child: child!,
+                    );
+                  },
+                );
+
+                if (escolhido != null) {
+                  String hora =
+                      "${escolhido.hour.toString().padLeft(2, '0')}:${escolhido.minute.toString().padLeft(2, '0')}";
+
+                  setState(() {
+                    _ctrl[key]!.text = hora;
+                  });
+                }
+              }
+            : null,
         decoration: InputDecoration(
           labelText: label,
+          hintText: isHora ? "Selecionar hora" : null,
+          suffixIcon: isHora
+              ? const Icon(Icons.access_time, color: Color(0xFFD4AF37))
+              : null,
           filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          fillColor: const Color(0xFFF9F9F9),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(
+              color: Color(0xFFD4AF37),
+              width: 2,
+            ),
+          ),
         ),
       ),
     );

@@ -17,6 +17,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'screens/qibla_page.dart';
 import 'screens/zakat_page.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 // 🔥 HANDLER BACKGROUND
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -35,6 +36,9 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // 🔥 ATIVAR CACHE OFFLINE
+  FirebaseDatabase.instance.setPersistenceEnabled(true);
 
   // 🔥 ESSENCIAL
   await NotificationService.initialize();
@@ -100,6 +104,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late Animation<double> _pulseAnimation;
   late AnimationController _avisoAnimController;
   late Animation<double> _avisoFade;
+  bool _online = true;
+  bool _mostrarBanner = false;
+  late StreamSubscription _connectivitySubscription;
   String _tempoRestante = "";
   String _proximaOracaoNome = "";
   String _proximaOracaoHora = "";
@@ -139,6 +146,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
 
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((result) {
+      bool estaOnline = result != ConnectivityResult.none;
+
+      if (estaOnline != _online) {
+        setState(() {
+          _online = estaOnline;
+          _mostrarBanner = true;
+        });
+
+        // Se ficou online, esconder após 3 segundos
+        if (estaOnline) {
+          Future.delayed(const Duration(seconds: 3), () {
+            if (mounted) {
+              setState(() {
+                _mostrarBanner = false;
+              });
+            }
+          });
+        }
+      }
+    });
     // 🔥 TESTE SE A MENSAGEM ESTÁ A CHEGAR
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print("🔥🔥🔥 MENSAGEM RECEBIDA");
@@ -200,6 +229,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _pulseController.dispose();
     _avisoAnimController.dispose();
     _zakatController.dispose();
+    _connectivitySubscription.cancel();
     super.dispose();
   }
 
@@ -536,11 +566,40 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         backgroundColor: const Color(0xFF0B3D2E),
         centerTitle: true,
         title: const Text(
-          "Mesquita Central de Quelimane",
+          "Masjid Central de Quelimane",
           style: TextStyle(color: Colors.white),
         ),
       ),
-      body: paginas[_indiceAtual],
+      body: Stack(
+        children: [
+          paginas[_indiceAtual],
+          if (_mostrarBanner)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                color: _online ? Colors.green : Colors.red,
+                child: SafeArea(
+                  bottom: false,
+                  child: Center(
+                    child: Text(
+                      _online
+                          ? "🟢 Conexão restaurada"
+                          : "🔴 Sem conexão à internet",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _indiceAtual,
         onTap: (i) => setState(() => _indiceAtual = i),
