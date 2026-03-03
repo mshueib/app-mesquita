@@ -28,7 +28,7 @@ class _DeveloperPageState extends State<DeveloperPage> {
   Future<void> _abrirEmail() async {
     final Uri emailUri = Uri(
       scheme: 'mailto',
-      path: 'muhamad.shueib@email.com',
+      path: 'muhamad.shueib@gmail.com',
       query: 'subject=Mosque Now - Contacto',
     );
 
@@ -36,7 +36,8 @@ class _DeveloperPageState extends State<DeveloperPage> {
   }
 
   Future<void> _abrirPolitica() async {
-    final Uri url = Uri.parse('https://seusite.com/politica.html');
+    final Uri url =
+        Uri.parse('https://sites.google.com/view/mosque-now-privacy');
 
     await launchUrl(url, mode: LaunchMode.externalApplication);
   }
