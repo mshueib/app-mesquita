@@ -18,6 +18,7 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'screens/qibla_page.dart';
 import 'screens/zakat_page.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'services/local_storage_service.dart';
 
 // 🔥 HANDLER BACKGROUND
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -53,17 +54,19 @@ void main() async {
   }
 
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  try {
+    await FirebaseMessaging.instance.requestPermission();
 
-  await FirebaseMessaging.instance.requestPermission();
-  NotificationSettings settings =
-      await FirebaseMessaging.instance.getNotificationSettings();
+    await FirebaseMessaging.instance.getNotificationSettings();
 
-  print("STATUS NOTIFICAÇÃO: ${settings.authorizationStatus}");
+    FirebaseMessaging.instance.getToken().then((token) {
+      print("🔥 TOKEN: $token");
+    });
 
-  String? token = await FirebaseMessaging.instance.getToken();
-  print("🔥 TOKEN: $token");
-
-  await FirebaseMessaging.instance.subscribeToTopic("mesquita");
+    FirebaseMessaging.instance.subscribeToTopic("mesquita");
+  } catch (e) {
+    print("🔥 FCM offline: $e");
+  }
 
   if (await Permission.scheduleExactAlarm.isDenied) {
     await Permission.scheduleExactAlarm.request();
@@ -96,6 +99,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
+  late DatabaseReference _dbRef;
   int _indiceAtual = 0;
   bool _isAdminAutenticado = false;
   bool _azanJaAgendado = false;
@@ -126,17 +130,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _carregarCacheInicial() async {
+    final dadosLocal = await LocalStorageService.carregarDados();
+
+    if (dadosLocal != null) {
+      setState(() {
+        dados = dadosLocal;
+      });
+    }
+  }
+
   bool _vibracaoAtiva = true;
   // 🔥 ZAKAT
   final TextEditingController _zakatController = TextEditingController();
   double? _resultadoZakat;
   final List<AvisoModel> _avisos = [];
   List<Map<String, dynamic>> _listaAvisos = [];
-  final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
+  /*final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
     app: Firebase.app(),
     databaseURL:
         'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/',
-  ).ref("app");
+  ).ref("app");*/
 
   Map<String, dynamic> dados = {};
   // 🔔 Guardar horários antigos de Jammah
@@ -145,7 +159,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _carregarCacheInicial();
 
+    try {
+      _dbRef = FirebaseDatabase.instanceFor(
+        app: Firebase.app(),
+        databaseURL:
+            'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/',
+      ).ref("app");
+
+      _dbRef.keepSynced(true); // PARA OFFLINE
+
+      _ouvirNuvem();
+    } catch (e) {
+      print("🔥 Firebase indisponível (modo offline): $e");
+    }
     _connectivitySubscription =
         Connectivity().onConnectivityChanged.listen((result) {
       bool estaOnline = result != ConnectivityResult.none;
@@ -238,10 +266,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final value = event.snapshot.value;
 
       if (value == null || value is! Map) {
-        setState(() {
-          dados = {};
-          _listaAvisos = [];
-        });
+        print("⚠️ Nenhum dado novo - mantendo cache");
         return;
       }
 
@@ -273,7 +298,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         dados = dadosMap;
         _listaAvisos = avisosTemp;
       });
-
+      LocalStorageService.salvarDados(dadosMap);
       if (!_azanJaAgendado) {
         _azanJaAgendado = true; // 👈 PRIMEIRO define true
         _agendarTodosAzan(dadosMap);
