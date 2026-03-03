@@ -104,6 +104,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late DatabaseReference _dbRef;
   int _indiceAtual = 0;
   bool _isAdminAutenticado = false;
+  late PageController _pageController;
   bool _azanJaAgendado = false;
   Timer? _timer;
   late AnimationController _pulseController;
@@ -191,6 +192,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _pageController = PageController();
     _carregarCacheInicial();
     _verificarInternetInicial();
 
@@ -291,6 +293,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _avisoAnimController.dispose();
     _zakatController.dispose();
     _connectivitySubscription.cancel();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -631,7 +634,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
       body: Stack(
         children: [
-          paginas[_indiceAtual],
+          // 🔥 PAGEVIEW (SWIPE)
+          PageView(
+            controller: _pageController,
+            onPageChanged: (index) {
+              setState(() {
+                _indiceAtual = index;
+              });
+            },
+            children: paginas,
+          ),
+
+          // 🔴🟢 BANNER
           if (_mostrarBanner)
             Positioned(
               top: 0,
@@ -661,7 +675,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _indiceAtual,
-        onTap: (i) => setState(() => _indiceAtual = i),
+        onTap: (i) {
+          _pageController.animateToPage(
+            i,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
+        },
         selectedItemColor: const Color(0xFF0B3D2E),
         type: BottomNavigationBarType.fixed,
         items: const [
