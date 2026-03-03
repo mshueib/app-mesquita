@@ -19,6 +19,7 @@ import 'screens/qibla_page.dart';
 import 'screens/zakat_page.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'services/local_storage_service.dart';
+import 'dart:io';
 
 // 🔥 HANDLER BACKGROUND
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -130,6 +131,36 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _verificarInternetInicial() async {
+    final result = await Connectivity().checkConnectivity();
+
+    bool estaOnline = result != ConnectivityResult.none;
+
+    setState(() {
+      _online = estaOnline;
+      _mostrarBanner = !estaOnline; // 🔥 mostra banner se iniciar offline
+    });
+
+    if (estaOnline) {
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) {
+          setState(() {
+            _mostrarBanner = false;
+          });
+        }
+      });
+    }
+  }
+
+  Future<bool> _temInternetReal() async {
+    try {
+      final result = await InternetAddress.lookup('google.com');
+      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _carregarCacheInicial() async {
     final dadosLocal = await LocalStorageService.carregarDados();
 
@@ -160,6 +191,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _carregarCacheInicial();
+    _verificarInternetInicial();
 
     try {
       _dbRef = FirebaseDatabase.instanceFor(
@@ -203,7 +235,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       print("NOTIFICATION: ${message.notification?.title}");
     });
 
-    _ouvirNuvem();
+    //_ouvirNuvem();
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print("📩 Mensagem recebida em foreground");
 
