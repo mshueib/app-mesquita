@@ -559,12 +559,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     Duration diff = proxHora.difference(agora);
 
-    setState(() {
-      _proximaOracaoNome = prox;
-      _proximaOracaoHora = hrs[prox]!;
-      _tempoRestante =
-          "${diff.inHours}h ${diff.inMinutes % 60}m ${diff.inSeconds % 60}s";
-    });
+    if (_tempoRestante !=
+        "${diff.inHours}h ${diff.inMinutes % 60}m ${diff.inSeconds % 60}s") {
+      setState(() {
+        _proximaOracaoNome = prox;
+        _proximaOracaoHora = hrs[prox]!;
+        _tempoRestante =
+            "${diff.inHours}h ${diff.inMinutes % 60}m ${diff.inSeconds % 60}s";
+      });
+    }
   }
 
   void _verificarMudancaJammah(Map<String, dynamic> novosDados) {
@@ -637,6 +640,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           // 🔥 PAGEVIEW (SWIPE)
           PageView(
             controller: _pageController,
+            physics: const BouncingScrollPhysics(),
             onPageChanged: (index) {
               setState(() {
                 _indiceAtual = index;
