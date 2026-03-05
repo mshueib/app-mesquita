@@ -100,7 +100,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
+class _HomePageState extends State<HomePage> {
   late DatabaseReference _dbRef;
   int _indiceAtual = 0;
   bool _isAdminAutenticado = false;
@@ -151,15 +151,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           });
         }
       });
-    }
-  }
-
-  Future<bool> _temInternetReal() async {
-    try {
-      final result = await InternetAddress.lookup('google.com');
-      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
-    } catch (_) {
-      return false;
     }
   }
 
@@ -239,16 +230,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
       }
     });
-    // 🔥 TESTE SE A MENSAGEM ESTÁ A CHEGAR
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print("🔥🔥🔥 MENSAGEM RECEBIDA");
-      print("DATA: ${message.data}");
-      print("NOTIFICATION: ${message.notification?.title}");
-    });
-
-    //_ouvirNuvem();
+// ✅ LISTENER ÚNICO
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       print("📩 Mensagem recebida em foreground");
+      print("DATA: ${message.data}");
 
       if (message.notification != null) {
         NotificationService.showNotification(
@@ -257,7 +242,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         );
       }
     });
-
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       print("📲 Notificação clicada");
     });
@@ -301,7 +285,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _timer?.cancel();
     //_pulseController.dispose();
     //_avisoAnimController.dispose();
-    _zakatController.dispose();
+
     _connectivitySubscription.cancel();
     _pageController.dispose();
     super.dispose();
@@ -431,7 +415,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     final agora = DateTime.now();
 
-    // 🔥 Ler horário de Maghrib
     String maghribStr = dados['maghrib_azan'] ?? "18:00";
     List<String> partes = maghribStr.split(':');
 
@@ -445,54 +428,43 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       int.parse(partes[1]),
     );
 
-    // 🔥 Se ainda não chegou Maghrib → não muda
+    // 🔥 Se ainda não chegou Maghrib → não faz nada
     if (agora.isBefore(hojeMaghrib)) return;
 
-    // 🔥 Data base islâmica começa após Maghrib
     DateTime dataIslamica = DateTime(agora.year, agora.month, agora.day);
+    String dataHoje = _formatarData(dataIslamica);
 
-    String? ultimaDataStr = dados['ultima_data_jejum'];
+    // 🔥 PROTECÇÃO — verificar antes de escrever
+    final snapshot = await _dbRef.child('ultima_data_jejum').get();
+    final ultimaDataStr = snapshot.value?.toString() ?? "";
 
-    if (ultimaDataStr == null || ultimaDataStr.isEmpty) {
-      await _dbRef.update({
-        'ultima_data_jejum': _formatarData(dataIslamica),
-      });
-      return;
-    }
+    // 🔥 Se já foi actualizado hoje → não escreve
+    if (ultimaDataStr == dataHoje) return;
 
-    DateTime ultimaData = DateTime.parse(ultimaDataStr);
-
-    if (ultimaData.isBefore(dataIslamica)) {
-      int diaAtual = int.tryParse(dados['jejum']?.toString() ?? "1") ?? 1;
-
-      int novoDia = diaAtual + 1;
-
-      if (novoDia > 30) {
-        novoDia = 1;
+    // 🔥 Usar transaction para garantir que só um dispositivo escreve
+    await _dbRef.child('ultima_data_jejum').runTransaction((currentData) {
+      // Se entretanto outro dispositivo já actualizou → cancelar
+      if (currentData.toString() == dataHoje) {
+        return Transaction.abort();
       }
 
-      await _dbRef.update({
-        'jejum': novoDia.toString(),
-        'ultima_data_jejum': _formatarData(dataIslamica),
-      });
-    }
-  }
+      return Transaction.success(dataHoje);
+    });
 
-  bool _avisoExpirado(String? prazo) {
-    if (prazo == null || prazo.isEmpty) return false;
+    // 🔥 Verificar novamente se foi este dispositivo a ganhar
+    final snapApos = await _dbRef.child('ultima_data_jejum').get();
+    if (snapApos.value?.toString() != dataHoje) return;
 
-    try {
-      DateTime dataPrazo = DateTime.parse(prazo);
-      DateTime hoje = DateTime.now();
+    // 🔥 Este dispositivo ganhou — actualizar o dia
+    final snapJejum = await _dbRef.child('jejum').get();
+    int diaAtual = int.tryParse(snapJejum.value?.toString() ?? "1") ?? 1;
 
-      DateTime hojeLimpo = DateTime(hoje.year, hoje.month, hoje.day);
-      DateTime prazoLimpo =
-          DateTime(dataPrazo.year, dataPrazo.month, dataPrazo.day);
+    int novoDia = diaAtual + 1;
+    if (novoDia > 30) novoDia = 1;
 
-      return hojeLimpo.isAfter(prazoLimpo);
-    } catch (e) {
-      return false;
-    }
+    await _dbRef.update({
+      'jejum': novoDia.toString(),
+    });
   }
 
   String _formatarData(DateTime data) {
@@ -515,40 +487,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  void _verificarMudancaHorarios(Map<String, dynamic> novosDados) {
-    final chaves = {
-      'fajr_azan': 'Fajr',
-      'dhuhr_azan': 'Dhuhr',
-      'asr_azan': 'Asr',
-      'maghrib_azan': 'Maghrib',
-      'isha_azan': 'Isha',
-    };
-
-    if (_horariosAntigos.isEmpty) {
-      _horariosAntigos = {
-        for (var chave in chaves.keys)
-          chave: novosDados[chave]?.toString() ?? ""
-      };
-      return;
-    }
-
-    for (var chave in chaves.keys) {
-      String antigo = _horariosAntigos[chave] ?? "";
-      String novo = novosDados[chave]?.toString() ?? "";
-
-      if (antigo != novo && novo.isNotEmpty) {
-        NotificationService.showNotification(
-          title: "🕌 Actualização de Horário",
-          body: "${chaves[chave]} - Azan actualizado para $novo",
-        );
-      }
-    }
-
-    _horariosAntigos = {
-      for (var chave in chaves.keys) chave: novosDados[chave]?.toString() ?? ""
-    };
-  }
-
   void _verificarNovoAviso(List<Map<String, dynamic>> novosAvisos) async {
     bool houveNovo = false;
 
@@ -568,81 +506,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     // 🔥 Só guarda se houve aviso novo — evita escritas desnecessárias
     if (houveNovo) {
       await LocalStorageService.salvarIdsNotificados(_idsAvisosNotificados);
-    }
-  }
-
-  void _calcularCountdown() {
-    if (dados.isEmpty) return;
-
-    DateTime agora = DateTime.now();
-
-    Map<String, String> hrs = {
-      "Fajr": dados['fajr_azan'] ?? "04:30",
-      "Zohr": dados['dhuhr_azan'] ?? "12:15",
-      "Asr": dados['asr_azan'] ?? "15:45",
-      "Maghrib": dados['maghrib_azan'] ?? "18:12",
-      "Isha": dados['isha_azan'] ?? "19:30",
-    };
-
-    String prox = "";
-    DateTime? proxHora;
-
-    for (var n in hrs.keys) {
-      List<String> p = hrs[n]!.split(':');
-      DateTime dt = DateTime(
-          agora.year, agora.month, agora.day, int.parse(p[0]), int.parse(p[1]));
-      if (dt.isAfter(agora)) {
-        prox = n;
-        proxHora = dt;
-        break;
-      }
-    }
-
-    if (proxHora == null) {
-      prox = "Fajr";
-      List<String> p = hrs["Fajr"]!.split(':');
-      proxHora = DateTime(agora.year, agora.month, agora.day + 1,
-          int.parse(p[0]), int.parse(p[1]));
-    }
-
-    Duration diff = proxHora.difference(agora);
-
-    if (_tempoRestante !=
-        "${diff.inHours}h ${diff.inMinutes % 60}m ${diff.inSeconds % 60}s") {
-      setState(() {
-        _proximaOracaoNome = prox;
-        _proximaOracaoHora = hrs[prox]!;
-        _tempoRestante =
-            "${diff.inHours}h ${diff.inMinutes % 60}m ${diff.inSeconds % 60}s";
-      });
-    }
-  }
-
-  void _verificarMudancaJammah(Map<String, dynamic> novosDados) {
-    final camposJammah = {
-      'fajr_namaz': 'Fajr',
-      'dhuhr_namaz': 'Dhuhr',
-      'asr_namaz': 'Asr',
-      'maghrib_namaz': 'Maghrib',
-      'isha_namaz': 'Isha',
-      'jummah_namaz': 'Jummah',
-    };
-
-    for (var campo in camposJammah.keys) {
-      final novoValor = novosDados[campo]?.toString() ?? "";
-
-      if (_horariosJammahAntigos.containsKey(campo)) {
-        final antigoValor = _horariosJammahAntigos[campo];
-
-        if (antigoValor != novoValor && novoValor.isNotEmpty) {
-          NotificationService.showNotification(
-            title: "🕌 Actualização de Horário",
-            body: "${camposJammah[campo]} - Iqamah actualizada para $novoValor",
-          );
-        }
-      }
-
-      _horariosJammahAntigos[campo] = novoValor;
     }
   }
 
@@ -1259,98 +1122,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
             ),
       ],
-    );
-  }
-
-  Widget _extraCol(IconData icon, String label, String? value) {
-    return Column(
-      children: [
-        Icon(icon, color: const Color(0xFF0B3D2E)),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          value ?? "--:--",
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF0B3D2E),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _extraColPremium(IconData icon, String label, String? value) {
-    return Column(
-      children: [
-        Icon(
-          icon,
-          color: const Color(0xFF0B3D2E),
-          size: 26,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF444444),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          value ?? "--:--",
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF0B3D2E),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _extraZawwal(String? value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFD4AF37).withOpacity(0.15),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        children: [
-          const Icon(
-            Icons.schedule,
-            color: Color(0xFFD4AF37),
-            size: 26,
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            "Zawwal",
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF8B6F00),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value ?? "--:--",
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF8B6F00),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
