@@ -287,7 +287,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     //_pulseController.repeat(reverse: true);
 
     // 🔥 UM ÚNICO TIMER
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+    _timer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!mounted) {
         _timer?.cancel();
         return;
@@ -648,7 +648,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final paginas = [
+    final List<Widget> paginas = [
       _paginaInicio(),
       _paginaAvisos(),
       _paginaTasbih(),
@@ -688,7 +688,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           // 🔥 PAGEVIEW (SWIPE)
           PageView(
             controller: _pageController,
-            physics: const BouncingScrollPhysics(),
+            physics: const ClampingScrollPhysics(),
             onPageChanged: (index) {
               setState(() {
                 _indiceAtual = index;
@@ -825,7 +825,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     return GestureDetector(
-      onTap: () => setState(() => _indiceAtual = 1),
+      onTap: () {
+        _pageController.animateToPage(
+          1,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      },
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(18),
