@@ -105,12 +105,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   int _indiceAtual = 0;
   bool _isAdminAutenticado = false;
   late PageController _pageController;
-  bool _azanJaAgendado = false;
+  Map<String, String> _horariosAzanAnteriores = {};
   Timer? _timer;
-  late AnimationController _pulseController;
-  late Animation<double> _pulseAnimation;
-  late AnimationController _avisoAnimController;
-  late Animation<double> _avisoFade;
+  //late AnimationController _pulseController;
+  //late Animation<double> _pulseAnimation;
+  //late AnimationController _avisoAnimController;
+  //late Animation<double> _avisoFade;
   bool _online = true;
   bool _mostrarBanner = false;
   late StreamSubscription _connectivitySubscription;
@@ -119,7 +119,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _proximaOracaoHora = "";
   Map<String, dynamic> _horariosAntigos = {};
   final List<Map<String, dynamic>> _avisosAntigos = [];
-  final List<String> _idsAvisosNotificados = [];
+  List<String> _idsAvisosNotificados = [];
   int _contadorTasbih = 0;
   int _prioridadeAviso(String tipo) {
     switch (tipo) {
@@ -173,6 +173,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _carregarIdsNotificados() async {
+    final ids = await LocalStorageService.carregarIdsNotificados();
+    setState(() {
+      _idsAvisosNotificados = ids;
+    });
+  }
+
   bool _vibracaoAtiva = true;
   // 🔥 ZAKAT
   final TextEditingController _zakatController = TextEditingController();
@@ -194,6 +201,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     super.initState();
     _pageController = PageController();
     _carregarCacheInicial();
+    _carregarIdsNotificados();
     _verificarInternetInicial();
 
     try {
@@ -254,7 +262,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       print("📲 Notificação clicada");
     });
 
-    _pulseController = AnimationController(
+    /*_pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
     );
@@ -274,14 +282,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _avisoFade = CurvedAnimation(
       parent: _avisoAnimController,
       curve: Curves.easeOut,
-    );
+    );*/
 
-    _pulseController.repeat(reverse: true);
+    //_pulseController.repeat(reverse: true);
 
     // 🔥 UM ÚNICO TIMER
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      _calcularCountdown();
+      if (!mounted) {
+        _timer?.cancel();
+        return;
+      }
       _verificarMudancaDeDia();
     });
   }
@@ -289,8 +299,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   @override
   void dispose() {
     _timer?.cancel();
-    _pulseController.dispose();
-    _avisoAnimController.dispose();
+    //_pulseController.dispose();
+    //_avisoAnimController.dispose();
     _zakatController.dispose();
     _connectivitySubscription.cancel();
     _pageController.dispose();
@@ -335,10 +345,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _listaAvisos = avisosTemp;
       });
       LocalStorageService.salvarDados(dadosMap);
-      if (!_azanJaAgendado) {
-        _azanJaAgendado = true; // 👈 PRIMEIRO define true
-        _agendarTodosAzan(dadosMap);
-      }
+      _verificarEReagendarAzan(dadosMap);
     });
   }
 
@@ -383,6 +390,40 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         id: id,
       );
     }
+  }
+
+  Future<void> _verificarEReagendarAzan(Map<String, dynamic> dadosMap) async {
+    final novosHorarios = {
+      "Fajr": dadosMap['fajr_azan']?.toString() ?? "",
+      "Dhuhr": dadosMap['dhuhr_azan']?.toString() ?? "",
+      "Asr": dadosMap['asr_azan']?.toString() ?? "",
+      "Maghrib": dadosMap['maghrib_azan']?.toString() ?? "",
+      "Isha": dadosMap['isha_azan']?.toString() ?? "",
+    };
+
+    // 🔥 Verificar se algum horário mudou
+    bool houveAlteracao = false;
+
+    for (var entry in novosHorarios.entries) {
+      if (_horariosAzanAnteriores[entry.key] != entry.value) {
+        houveAlteracao = true;
+        break;
+      }
+    }
+
+    // 🔥 Só reagenda se houve alteração
+    if (!houveAlteracao) return;
+
+    print("🕌 Horários alterados — a reagendar Azan...");
+
+    // 🔥 Cancelar todos os agendamentos anteriores
+    await NotificationService.cancelarAzan();
+
+    // 🔥 Reagendar com os novos horários
+    await _agendarTodosAzan(dadosMap);
+
+    // 🔥 Guardar os novos horários como referência
+    _horariosAzanAnteriores = novosHorarios;
   }
 
   Future<void> _verificarMudancaDeDia() async {
@@ -508,7 +549,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     };
   }
 
-  void _verificarNovoAviso(List<Map<String, dynamic>> novosAvisos) {
+  void _verificarNovoAviso(List<Map<String, dynamic>> novosAvisos) async {
+    bool houveNovo = false;
+
     for (var aviso in novosAvisos) {
       String id = aviso['id'];
 
@@ -517,9 +560,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           title: "Novo Aviso",
           body: aviso['texto'] ?? "",
         );
-
         _idsAvisosNotificados.add(id);
+        houveNovo = true;
       }
+    }
+
+    // 🔥 Só guarda se houve aviso novo — evita escritas desnecessárias
+    if (houveNovo) {
+      await LocalStorageService.salvarIdsNotificados(_idsAvisosNotificados);
     }
   }
 
@@ -715,7 +763,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         children: [
           _cardAvisosPrincipal(),
           const SizedBox(height: 15),
-          _cardProximaOracao(),
+          CountdownCard(
+            dados: dados,
+            onProximaOracaoChanged: (nome) {
+              setState(() {
+                _proximaOracaoNome = nome;
+              });
+            },
+          ),
           const SizedBox(height: 15),
           _cardIslamico(),
           const SizedBox(height: 20),
@@ -932,7 +987,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _cardProximaOracao() {
+  /*Widget _cardProximaOracao() {
     return ScaleTransition(
       scale: _pulseAnimation,
       child: Container(
@@ -980,7 +1035,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ),
       ),
     );
-  }
+  }*/
 
   Widget _cardIslamico() {
     return Container(
@@ -1522,6 +1577,160 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class CountdownCard extends StatefulWidget {
+  final Map<String, dynamic> dados;
+  final ValueChanged<String>? onProximaOracaoChanged;
+
+  const CountdownCard({
+    super.key,
+    required this.dados,
+    this.onProximaOracaoChanged,
+  });
+
+  @override
+  State<CountdownCard> createState() => _CountdownCardState();
+}
+
+class _CountdownCardState extends State<CountdownCard>
+    with SingleTickerProviderStateMixin {
+  Timer? _timer;
+  String _tempoRestante = "";
+  String _proximaOracaoNome = "";
+  String _proximaOracaoHora = "";
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // ✅ DESCOMENTADO
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.03).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+    _pulseController.repeat(reverse: true);
+
+    _calcular();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      _calcular();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _pulseController.dispose(); // ✅ DESCOMENTADO
+    super.dispose();
+  }
+
+  void _calcular() {
+    if (widget.dados.isEmpty) return;
+    DateTime agora = DateTime.now();
+    Map<String, String> hrs = {
+      "Fajr": widget.dados['fajr_azan'] ?? "04:30",
+      "Zohr": widget.dados['dhuhr_azan'] ?? "12:15",
+      "Asr": widget.dados['asr_azan'] ?? "15:45",
+      "Maghrib": widget.dados['maghrib_azan'] ?? "18:12",
+      "Isha": widget.dados['isha_azan'] ?? "19:30",
+    };
+    String prox = "";
+    DateTime? proxHora;
+    for (var n in hrs.keys) {
+      List<String> p = hrs[n]!.split(':');
+      DateTime dt = DateTime(
+        agora.year,
+        agora.month,
+        agora.day,
+        int.parse(p[0]),
+        int.parse(p[1]),
+      );
+      if (dt.isAfter(agora)) {
+        prox = n;
+        proxHora = dt;
+        break;
+      }
+    }
+    if (proxHora == null) {
+      prox = "Fajr";
+      List<String> p = hrs["Fajr"]!.split(':');
+      proxHora = DateTime(
+        agora.year,
+        agora.month,
+        agora.day + 1,
+        int.parse(p[0]),
+        int.parse(p[1]),
+      );
+    }
+    Duration diff = proxHora.difference(agora);
+    setState(() {
+      _proximaOracaoNome = prox;
+      _proximaOracaoHora = hrs[prox]!;
+      _tempoRestante =
+          "${diff.inHours}h ${diff.inMinutes % 60}m ${diff.inSeconds % 60}s";
+    });
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          widget.onProximaOracaoChanged?.call(prox);
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _pulseAnimation,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF0B3D2E), Color(0xFF1E6B3C)],
+          ),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Column(
+          children: [
+            const Text(
+              "Próxima Oração",
+              style: TextStyle(color: Colors.white70, fontSize: 16),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _proximaOracaoNome,
+              style: const TextStyle(
+                color: Color(0xFFD4AF37),
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _proximaOracaoHora,
+              style: const TextStyle(
+                color: Color(0xFFD4AF37),
+                fontSize: 44,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              "Faltam $_tempoRestante",
+              style: const TextStyle(color: Colors.white),
             ),
           ],
         ),

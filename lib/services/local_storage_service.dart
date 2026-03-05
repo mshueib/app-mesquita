@@ -17,4 +17,14 @@ class LocalStorageService {
 
     return jsonDecode(jsonString);
   }
+
+  static Future<List<String>> carregarIdsNotificados() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList('ids_avisos_notificados') ?? [];
+  }
+
+  static Future<void> salvarIdsNotificados(List<String> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('ids_avisos_notificados', ids);
+  }
 }

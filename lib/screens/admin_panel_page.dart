@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:intl/intl.dart';
+import '../services/auth_service.dart';
 
 class AdminPanelPage extends StatefulWidget {
   final DatabaseReference dbRef;
@@ -367,7 +368,10 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: widget.onLogout,
+            onPressed: () async {
+              await AuthService.logout(); // 🔥 termina sessão Firebase
+              widget.onLogout();
+            },
           )
         ],
       ),

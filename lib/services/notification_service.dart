@@ -100,6 +100,14 @@ class NotificationService {
     print("🕌 Agendado $prayerName para $hour:$minute");
   }
 
+  // Adicionar dentro da classe NotificationService:
+  static Future<void> cancelarAzan() async {
+    // IDs 501 a 505 são reservados para o Azan
+    for (int id = 501; id <= 505; id++) {
+      await _notifications.cancel(id: id);
+    }
+  }
+
   static Future<void> cancelAll() async {
     await _notifications.cancelAll();
   }
