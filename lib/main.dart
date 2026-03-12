@@ -271,7 +271,7 @@ class _HomePageState extends State<HomePage> {
     //_pulseController.repeat(reverse: true);
 
     // 🔥 UM ÚNICO TIMER
-    _timer = Timer.periodic(const Duration(minutes: 1), (_) {
+    _timer = Timer.periodic(const Duration(milliseconds: 5000), (_) {
       if (!mounted) {
         _timer?.cancel();
         return;

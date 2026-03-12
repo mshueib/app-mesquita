@@ -1,4 +1,4 @@
-package com.example.mesquita_quelimane
+package com.mosque.now
 
 import io.flutter.embedding.android.FlutterActivity
 

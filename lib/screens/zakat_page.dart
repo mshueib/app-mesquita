@@ -170,8 +170,8 @@ class _ZakatPageState extends State<ZakatPage> {
                                         .replaceAll(',', '.')) ??
                                     0) >=
                                 nissabFinal)
-                        ? "✔ Você atingiu o Nissab"
-                        : "⚠ Valor abaixo do Nissab",
+                        ? "✔"
+                        : "⚠ Valor abaixo",
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       color: (double.tryParse(_valorController.text

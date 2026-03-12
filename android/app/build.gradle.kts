@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("com.google.gms.google-services")
@@ -5,8 +8,15 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// 🔥 CARREGAR KEY.PROPERTIES
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 android {
-    namespace = "com.example.mesquita_quelimane"
+    namespace = "com.mosque.now"
 
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
@@ -22,18 +32,26 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.mesquita_quelimane"
-
+        applicationId = "com.mosque.now"
         minSdk = flutter.minSdkVersion
         targetSdk = 36
-
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    // 🔥 CONFIGURAÇÃO DE ASSINATURA
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
+            storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+            storePassword = keystoreProperties["storePassword"] as String
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release") // 🔥 mudou de "debug" para "release"
             isMinifyEnabled = false
             isShrinkResources = false
         }

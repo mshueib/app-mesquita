@@ -1,15 +1,16 @@
 {
   "project_info": {
     "project_number": "268973299952",
+    "firebase_url": "https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app",
     "project_id": "mesquita-40d71",
     "storage_bucket": "mesquita-40d71.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:268973299952:android:7b6f87b347ec869cf8ca35",
+        "mobilesdk_app_id": "1:268973299952:android:57e25ddcfa060fb6f8ca35",
         "android_client_info": {
-          "package_name": "com.example.mesquita_quelimane"
+          "package_name": "com.mosque.now"
         }
       },
       "oauth_client": [],
