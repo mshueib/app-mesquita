@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 
 class AudioPage extends StatefulWidget {
   const AudioPage({super.key});
@@ -11,7 +13,7 @@ class AudioPage extends StatefulWidget {
 class _AudioPageState extends State<AudioPage> {
   late final WebViewController _controller;
   bool _isLoading = true;
-  String _modo = "LIVE"; // LIVE ou GRAVAÇÕES
+  String _modo = "GRAVAÇÕES"; // começa mais leve
 
   @override
   void initState() {
@@ -19,19 +21,33 @@ class _AudioPageState extends State<AudioPage> {
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..loadRequest(
-          Uri.parse("https://media.smartbilal.com/masjid/mzcentraldequelimane"))
+      ..enableZoom(false)
+      ..loadRequest(Uri.parse(
+          "https://media.smartbilal.com/masjid/mzcentraldequelimane/recordings"))
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (url) {
-            setState(() {
-              _isLoading = true;
-            });
+            setState(() => _isLoading = true);
           },
-          onPageFinished: (url) {
-            setState(() {
-              _isLoading = false;
-            });
+          onPageFinished: (url) async {
+            setState(() => _isLoading = false);
+
+            await _controller.runJavaScript('''
+    document.documentElement.style.overflowX = 'hidden';
+    document.body.style.overflowX = 'hidden';
+    document.body.style.width = '100vw';
+    document.body.style.maxWidth = '100vw';
+    document.body.style.touchAction = 'pan-y';
+
+    document.querySelectorAll("*").forEach(e => {
+      e.style.maxWidth = '100vw';
+      e.style.boxSizing = 'border-box';
+    });
+
+    document.querySelectorAll("img").forEach(e => e.style.display="none");
+    document.querySelectorAll("header").forEach(e => e.style.display="none");
+    document.querySelectorAll("footer").forEach(e => e.style.display="none");
+  ''');
           },
         ),
       );
@@ -63,12 +79,12 @@ class _AudioPageState extends State<AudioPage> {
       backgroundColor: const Color(0xFFF4F1EA),
       appBar: AppBar(
         title: const Text("Áudio"),
-        backgroundColor: const Color(0xFF0B3D2E),
+        backgroundColor: const Color.fromARGB(255, 217, 232, 227),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Column(
         children: [
-          // 🔴 BANNER SUPERIOR
+          // 🔴 BANNER
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
@@ -115,16 +131,31 @@ class _AudioPageState extends State<AudioPage> {
             ),
           ),
 
-          // 🌐 WEBVIEW + LOADER
+          // 🌐 WEBVIEW
           Expanded(
             child: Stack(
               children: [
-                WebViewWidget(controller: _controller),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragStart: (_) {},
+                  onHorizontalDragUpdate: (_) {},
+                  onHorizontalDragEnd: (_) {},
+                  child: WebViewWidget(
+                    controller: _controller,
+                    gestureRecognizers: {
+                      Factory<OneSequenceGestureRecognizer>(
+                        () => EagerGestureRecognizer(),
+                      ),
+                    },
+                  ),
+                ),
                 if (_isLoading)
                   Container(
-                    color: Colors.black12,
+                    color: Colors.white.withOpacity(0.7),
                     child: const Center(
-                      child: CircularProgressIndicator(),
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF0B3D2E),
+                      ),
                     ),
                   ),
               ],
