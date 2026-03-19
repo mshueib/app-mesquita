@@ -21,6 +21,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'services/local_storage_service.dart';
 import 'dart:io';
 import 'screens/developer_page.dart';
+import 'screens/audio_page.dart';
 
 // 🔥 HANDLER BACKGROUND
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -514,6 +515,7 @@ class _HomePageState extends State<HomePage> {
     final List<Widget> paginas = [
       _paginaInicio(),
       _paginaAvisos(),
+      const AudioPage(),
       _paginaTasbih(),
       ZakatPage(
         nissabAdmin:
@@ -602,6 +604,10 @@ class _HomePageState extends State<HomePage> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: "Início"),
           BottomNavigationBarItem(icon: Icon(Icons.info), label: "Avisos"),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.radio),
+            label: "Audio",
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.touch_app), label: "Tasbih"),
           BottomNavigationBarItem(
             icon: Icon(Icons.calculate),
