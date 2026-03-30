@@ -92,7 +92,7 @@ class _AudioPageState extends State<AudioPage> {
             child: Text(
               _modo == "LIVE"
                   ? "🔴 Transmissão ao Vivo"
-                  : "🎧 Gravações da Mesquita",
+                  : "🎧 Gravações do Masjid",
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Colors.white,

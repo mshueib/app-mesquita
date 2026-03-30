@@ -102,6 +102,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  String _ultimaDataProcessada = "";
   late DatabaseReference _dbRef;
   int _indiceAtual = 0;
   bool _isAdminAutenticado = false;
@@ -272,11 +273,7 @@ class _HomePageState extends State<HomePage> {
     //_pulseController.repeat(reverse: true);
 
     // 🔥 UM ÚNICO TIMER
-    _timer = Timer.periodic(const Duration(milliseconds: 5000), (_) {
-      if (!mounted) {
-        _timer?.cancel();
-        return;
-      }
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       _verificarMudancaDeDia();
     });
   }
@@ -416,56 +413,75 @@ class _HomePageState extends State<HomePage> {
 
     final agora = DateTime.now();
 
-    String maghribStr = dados['maghrib_azan'] ?? "18:00";
-    List<String> partes = maghribStr.split(':');
+    // 🔥 1. GARANTIR QUE TEMOS MAGHRIB REAL
+    String? maghribStr = dados['maghrib_azan'];
 
+    if (maghribStr == null || maghribStr.isEmpty) {
+      print("⚠️ Maghrib não disponível ainda");
+      return;
+    }
+
+    // 🔥 2. PARSE SEGURO
+    List<String> partes = maghribStr.split(':');
     if (partes.length != 2) return;
 
+    final hour = int.tryParse(partes[0]);
+    final minute = int.tryParse(partes[1]);
+
+    if (hour == null || minute == null) return;
+
+    // 🔥 3. CRIAR DATA DO MAGHRIB
     DateTime hojeMaghrib = DateTime(
       agora.year,
       agora.month,
       agora.day,
-      int.parse(partes[0]),
-      int.parse(partes[1]),
+      hour,
+      minute,
     );
 
-    // 🔥 Se ainda não chegou Maghrib → não faz nada
+    // 🔒 AINDA NÃO CHEGOU MAGHRIB → NÃO FAZ NADA
     if (agora.isBefore(hojeMaghrib)) return;
 
-    DateTime dataIslamica = DateTime(agora.year, agora.month, agora.day);
-    String dataHoje = _formatarData(dataIslamica);
+    // 🔥 4. DATA FORMATADA
+    String hojeStr = "${agora.year.toString().padLeft(4, '0')}-"
+        "${agora.month.toString().padLeft(2, '0')}-"
+        "${agora.day.toString().padLeft(2, '0')}";
 
-    // 🔥 PROTECÇÃO — verificar antes de escrever
-    final snapshot = await _dbRef.child('ultima_data_jejum').get();
-    final ultimaDataStr = snapshot.value?.toString() ?? "";
+    // 🔒 5. PROTEÇÃO LOCAL (evita múltiplas execuções)
+    if (_ultimaDataProcessada == hojeStr) return;
 
-    // 🔥 Se já foi actualizado hoje → não escreve
-    if (ultimaDataStr == dataHoje) return;
+    String? ultimaDataFirebase = dados['ultima_data_jejum'];
 
-    // 🔥 Usar transaction para garantir que só um dispositivo escreve
-    await _dbRef.child('ultima_data_jejum').runTransaction((currentData) {
-      // Se entretanto outro dispositivo já actualizou → cancelar
-      if (currentData.toString() == dataHoje) {
-        return Transaction.abort();
-      }
+    if (ultimaDataFirebase == hojeStr) {
+      _ultimaDataProcessada = hojeStr;
+      return;
+    }
 
-      return Transaction.success(dataHoje);
-    });
+    print("🌙 Atualizando dia islâmico...");
 
-    // 🔥 Verificar novamente se foi este dispositivo a ganhar
-    final snapApos = await _dbRef.child('ultima_data_jejum').get();
-    if (snapApos.value?.toString() != dataHoje) return;
-
-    // 🔥 Este dispositivo ganhou — actualizar o dia
-    final snapJejum = await _dbRef.child('jejum').get();
-    int diaAtual = int.tryParse(snapJejum.value?.toString() ?? "1") ?? 1;
+    // 🔥 7. INCREMENTAR DIA
+    int diaAtual = int.tryParse(dados['jejum']?.toString() ?? "1") ?? 1;
 
     int novoDia = diaAtual + 1;
-    if (novoDia > 30) novoDia = 1;
 
-    await _dbRef.update({
-      'jejum': novoDia.toString(),
-    });
+    if (novoDia > 30) {
+      novoDia = 1;
+    }
+
+    try {
+      // 🔥 8. ATUALIZAR FIREBASE
+      await _dbRef.update({
+        'jejum': novoDia.toString(),
+        'ultima_data_jejum': hojeStr,
+      });
+
+      // 🔥 9. ATUALIZAR LOCAL
+      _ultimaDataProcessada = hojeStr;
+
+      print("✅ Dia atualizado para $novoDia");
+    } catch (e) {
+      print("❌ Erro ao atualizar dia: $e");
+    }
   }
 
   String _formatarData(DateTime data) {
@@ -1385,6 +1401,7 @@ class CountdownCard extends StatefulWidget {
 class _CountdownCardState extends State<CountdownCard>
     with SingleTickerProviderStateMixin {
   Timer? _timer;
+  String _ultimaDataProcessada = "";
   String _tempoRestante = "";
   String _proximaOracaoNome = "";
   String _proximaOracaoHora = "";
