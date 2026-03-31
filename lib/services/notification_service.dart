@@ -2,6 +2,13 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 
 class NotificationService {
+  static const Map<String, int> azanIds = {
+    "Fajr": 501,
+    "Dhuhr": 502,
+    "Asr": 503,
+    "Maghrib": 504,
+    "Isha": 505,
+  };
   static final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
@@ -102,8 +109,7 @@ class NotificationService {
 
   // Adicionar dentro da classe NotificationService:
   static Future<void> cancelarAzan() async {
-    // IDs 501 a 505 são reservados para o Azan
-    for (int id = 501; id <= 505; id++) {
+    for (var id in azanIds.values) {
       await _notifications.cancel(id: id);
     }
   }

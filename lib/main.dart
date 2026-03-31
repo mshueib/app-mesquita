@@ -42,7 +42,9 @@ void main() async {
   );
 
   // 🔥 ATIVAR CACHE OFFLINE
-  FirebaseDatabase.instance.setPersistenceEnabled(true);
+  try {
+    FirebaseDatabase.instance.setPersistenceEnabled(true);
+  } catch (_) {}
 
   // 🔥 ESSENCIAL
   await NotificationService.initialize();
@@ -116,10 +118,10 @@ class _HomePageState extends State<HomePage> {
   bool _online = true;
   bool _mostrarBanner = false;
   late StreamSubscription _connectivitySubscription;
-  String _tempoRestante = "";
+  final String _tempoRestante = "";
   String _proximaOracaoNome = "";
-  String _proximaOracaoHora = "";
-  Map<String, dynamic> _horariosAntigos = {};
+  final String _proximaOracaoHora = "";
+  final Map<String, dynamic> _horariosAntigos = {};
   final List<Map<String, dynamic>> _avisosAntigos = [];
   List<String> _idsAvisosNotificados = [];
   int _contadorTasbih = 0;
@@ -274,6 +276,7 @@ class _HomePageState extends State<HomePage> {
 
     // 🔥 UM ÚNICO TIMER
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
       _verificarMudancaDeDia();
     });
   }
@@ -344,8 +347,6 @@ class _HomePageState extends State<HomePage> {
       "Isha": dadosMap['isha_azan'],
     };
 
-    int id = 500;
-
     for (var entry in horarios.entries) {
       final nome = entry.key;
       final horaStr = entry.value;
@@ -358,18 +359,16 @@ class _HomePageState extends State<HomePage> {
       final hour = int.tryParse(partes[0]) ?? 0;
       final minute = int.tryParse(partes[1]) ?? 0;
 
-      if (hour < 0 || hour > 23) continue;
-      if (minute < 0 || minute > 59) continue;
+      if (!NotificationService.azanIds.containsKey(nome)) continue;
 
-      id++;
-
+      // 🔥 VOLTA ISTO
       print("🕌 Agendando $nome para $hour:$minute");
 
       await NotificationService.scheduleAzan(
         prayerName: nome,
         hour: hour,
         minute: minute,
-        id: id,
+        id: NotificationService.azanIds[nome]!,
       );
     }
   }
@@ -1401,7 +1400,7 @@ class CountdownCard extends StatefulWidget {
 class _CountdownCardState extends State<CountdownCard>
     with SingleTickerProviderStateMixin {
   Timer? _timer;
-  String _ultimaDataProcessada = "";
+  final String _ultimaDataProcessada = "";
   String _tempoRestante = "";
   String _proximaOracaoNome = "";
   String _proximaOracaoHora = "";
