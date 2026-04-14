@@ -339,6 +339,9 @@ class _HomePageState extends State<HomePage> {
       await _atualizarHorariosEReagendar();
 
       if (message.notification != null) {
+        final ativoHorarios =
+            await LocalStorageService.notificacoesHorariosAtivas();
+        if (!ativoHorarios) return;
         await NotificationService.showNotification(
           title: message.notification!.title ?? "🕌 Horário actualizado",
           body: message.notification!.body ?? "Os horários foram actualizados",
@@ -436,7 +439,8 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _agendarTodosAzan(Map<String, dynamic> dadosMap) async {
     if (dadosMap.isEmpty) return;
-
+    final ativoAzan = await LocalStorageService.alarmeAzanAtivo();
+    if (!ativoAzan) return;
     print("🔥 A AGENDAR AZAN...");
 
     final horarios = {
@@ -698,10 +702,14 @@ class _HomePageState extends State<HomePage> {
       String id = aviso['id'];
 
       if (!_idsAvisosNotificados.contains(id)) {
-        NotificationService.showNotification(
-          title: "📢 Novo Aviso",
-          body: aviso['texto'] ?? "",
-        );
+        final ativoAvisos =
+            await LocalStorageService.notificacoesAvisosAtivos();
+        if (ativoAvisos) {
+          NotificationService.showNotification(
+            title: "📢 Novo Aviso",
+            body: aviso['texto'] ?? "",
+          );
+        }
         _idsAvisosNotificados.add(id);
         houveNovo = true;
       }
