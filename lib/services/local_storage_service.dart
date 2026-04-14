@@ -27,4 +27,24 @@ class LocalStorageService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList('ids_avisos_notificados', ids);
   }
+
+  static Future<List<String>> carregarFavoritos() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList('mesquitas_favoritas') ?? [];
+  }
+
+  static Future<void> salvarFavoritos(List<String> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('mesquitas_favoritas', ids);
+  }
+
+  static Future<bool> notificacoesAtivas() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('notificacoes_ativas') ?? true;
+  }
+
+  static Future<void> setNotificacoes(bool valor) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('notificacoes_ativas', valor);
+  }
 }

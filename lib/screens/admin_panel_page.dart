@@ -23,6 +23,7 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
   final TextEditingController _oradorController = TextEditingController();
   final Map<String, TextEditingController> _ctrl = {};
   final List<Map<String, dynamic>> _avisos = [];
+  Map<String, String> _valoresAntigos = {};
   bool _horaMaiorOuIgual(String azan, String iqamah) {
     try {
       final azanPartes = azan.split(':');
@@ -100,6 +101,9 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
 
     _oradorController.text =
         widget.dadosAtuais['orador_jummah']?.toString() ?? "";
+    _valoresAntigos = {
+      for (var c in campos) c: widget.dadosAtuais[c]?.toString() ?? ""
+    };
   }
 
   void _carregarAvisos() {
@@ -236,6 +240,33 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     dados['ultima_atualizacao_salat'] = DateTime.now().toIso8601String();
 
     await widget.dbRef.update(dados);
+    final idMesquita = widget.dbRef.key;
+    String campoAlterado = "horarios";
+    String valorAlterado = "actualizado";
+
+    for (var entry in dados.entries) {
+      final campo = entry.key;
+      if (campo == "ultima_atualizacao_salat" || campo == "orador_jummah")
+        continue;
+      final antigoValor = _valoresAntigos[campo] ?? "";
+      if (entry.value.toString() != antigoValor) {
+        campoAlterado = campo;
+        valorAlterado = entry.value.toString();
+        break;
+      }
+    }
+    _valoresAntigos = {
+      for (var entry in dados.entries) entry.key: entry.value.toString()
+    };
+
+    // só envia trigger se houve alteração real
+    if (campoAlterado != "horarios") {
+      await FirebaseDatabase.instance.ref("app/triggers/$idMesquita").set({
+        "campo": campoAlterado,
+        "valor": valorAlterado,
+        "timestamp": DateTime.now().millisecondsSinceEpoch,
+      });
+    }
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
