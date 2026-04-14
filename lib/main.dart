@@ -747,63 +747,75 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: const Color(0xFF0B3D2E),
         centerTitle: true,
         title: const Text(
-          "Masjid Central de Quelimane",
-          style: TextStyle(color: Colors.white),
+          "Masjid Central: Quelimane",
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 19,
+          ),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
         ),
         actions: [
-          // ⭐ FAVORITO (já tens)
-          IconButton(
-            icon: Icon(
-              _favoritos.contains(_mesquitaSelecionada)
-                  ? Icons.star
-                  : Icons.star_border,
-              color: Colors.amber,
-            ),
-            onPressed: () {
-              if (_mesquitaSelecionada != null) {
-                _toggleFavorito(_mesquitaSelecionada!);
-              }
-            },
-          ),
-
-          // 🔍 PESQUISA (ADICIONAR ESTE)
-          IconButton(
-            icon: const Icon(Icons.search, color: Colors.white),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => MesquitasPage(
-                    onSelecionar: (id) async {
-                      setState(() {
-                        _mesquitaSelecionada = id;
-
-                        _dbRef = FirebaseDatabase.instanceFor(
-                          app: Firebase.app(),
-                          databaseURL:
-                              'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/',
-                        ).ref("mesquitas/$id");
-                      });
-
-                      _ouvirNuvem();
-
-                      await NotificationService.cancelarAzan();
-                      await _agendarTodosAzan(await _dbRef.get().then(
-                          (e) => Map<String, dynamic>.from(e.value as Map)));
-                    },
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              GestureDetector(
+                onTap: () {
+                  if (_mesquitaSelecionada != null) {
+                    _toggleFavorito(_mesquitaSelecionada!);
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Icon(
+                    _favoritos.contains(_mesquitaSelecionada)
+                        ? Icons.star
+                        : Icons.star_border,
+                    color: Colors.amber,
+                    size: 22,
                   ),
                 ),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings, color: Colors.white),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsPage()),
-              );
-            },
+              ),
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MesquitasPage(
+                        onSelecionar: (id) async {
+                          setState(() {
+                            _mesquitaSelecionada = id;
+                            _dbRef = FirebaseDatabase.instanceFor(
+                              app: Firebase.app(),
+                              databaseURL:
+                                  'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/',
+                            ).ref("mesquitas/$id");
+                          });
+                          _ouvirNuvem();
+                          await NotificationService.cancelarAzan();
+                          await _agendarTodosAzan(await _dbRef.get().then((e) =>
+                              Map<String, dynamic>.from(e.value as Map)));
+                        },
+                      ),
+                    ),
+                  );
+                },
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Icon(Icons.search, color: Colors.white, size: 22),
+                ),
+              ),
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const SettingsPage()));
+                },
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 4, right: 8),
+                  child: Icon(Icons.settings, color: Colors.white, size: 22),
+                ),
+              ),
+            ],
           ),
         ],
       ),
