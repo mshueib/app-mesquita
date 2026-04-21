@@ -2,7 +2,7 @@ name: mesquita_quelimane
 description: "Aplicativo oficial MosqueNow com horários de oração, notificações, Qibla, Zakat e recursos islâmicos."
 publish_to: 'none'
 
-version: 1.0.2+3
+version: 1.0.2+4
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -27,7 +27,9 @@ dependencies:
   android_intent_plus: ^5.1.0
   connectivity_plus: ^5.0.2
   package_info_plus: ^9.0.0
-  url_launcher: ^6.2.5
+  url_launcher: ^6.3.0
+  in_app_update: ^4.2.3
+  
 
 
   # Location

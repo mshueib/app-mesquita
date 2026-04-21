@@ -101,7 +101,6 @@ class NotificationService {
       playSound: true,
       enableVibration: true,
       category: AndroidNotificationCategory.alarm,
-      fullScreenIntent: true,
       visibility: NotificationVisibility.public,
     );
 

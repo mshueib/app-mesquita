@@ -10,20 +10,19 @@ import 'package:flutter/services.dart';
 import 'services/notification_service.dart';
 import 'screens/admin_login_page.dart';
 import 'screens/admin_panel_page.dart';
-import 'models/aviso_model.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:permission_handler/permission_handler.dart';
-import 'package:android_intent_plus/android_intent.dart';
 import 'screens/qibla_page.dart';
 import 'screens/zakat_page.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'services/local_storage_service.dart';
-import 'dart:io';
 import 'screens/developer_page.dart';
 import 'screens/audio_page.dart';
 import 'screens/mesquitas_page.dart';
 import 'screens/settings_page.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // 🔥 HANDLER BACKGROUND
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -41,7 +40,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     );
     return;
   }
-
+//VERIFICA PREFERÊNCIA ANTES DE AGENDAR
+  final ativoAzan = await LocalStorageService.alarmeAzanAtivo();
+  if (!ativoAzan) return;
   final dbRef = FirebaseDatabase.instance.ref("mesquitas/mesquita_quelimane");
 
   final snapshot = await dbRef.get();
@@ -101,13 +102,7 @@ void main() async {
   await NotificationService.initialize();
 
   await Permission.notification.request();
-
-  if (!await Permission.scheduleExactAlarm.isGranted) {
-    final intent = AndroidIntent(
-      action: 'android.settings.REQUEST_SCHEDULE_EXACT_ALARM',
-    );
-    await intent.launch();
-  }
+  await Permission.scheduleExactAlarm.request();
 
   try {
     await FirebaseMessaging.instance.requestPermission();
@@ -121,10 +116,6 @@ void main() async {
     FirebaseMessaging.instance.subscribeToTopic("mesquita");
   } catch (e) {
     print("🔥 FCM offline: $e");
-  }
-
-  if (await Permission.scheduleExactAlarm.isDenied) {
-    await Permission.scheduleExactAlarm.request();
   }
 
   runApp(const OverlaySupport.global(child: MesquitaApp()));
@@ -155,10 +146,9 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   String? _mesquitaSelecionada;
-  String _ultimaDataProcessada = "";
+
   StreamSubscription? _dbSub;
   late DatabaseReference _dbRef;
-  late DatabaseReference _appRef;
   int _indiceAtual = 0;
   bool _isAdminAutenticado = false;
   late PageController _pageController;
@@ -171,11 +161,9 @@ class _HomePageState extends State<HomePage> {
   bool _online = true;
   bool _mostrarBanner = false;
   late StreamSubscription _connectivitySubscription;
-  final String _tempoRestante = "";
+
   String _proximaOracaoNome = "";
-  final String _proximaOracaoHora = "";
-  final Map<String, dynamic> _horariosAntigos = {};
-  final List<Map<String, dynamic>> _avisosAntigos = [];
+
   List<String> _idsAvisosNotificados = [];
   int _contadorTasbih = 0;
   int _prioridadeAviso(String tipo) {
@@ -228,11 +216,36 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  Future<void> _reagendarAzanSeNecessario() async {
+    try {
+      final ativoAzan = await LocalStorageService.alarmeAzanAtivo();
+      if (!ativoAzan) return;
+
+      // 🔥 SÓ REAGENDA SE TIVER DADOS
+      if (dados.isEmpty) {
+        // Tenta carregar do Firebase
+        final snapshot = await _dbRef.get();
+        if (!snapshot.exists) return;
+        final dadosFirebase = Map<String, dynamic>.from(snapshot.value as Map);
+
+        await NotificationService.cancelarAzan();
+        await _agendarTodosAzan(dadosFirebase);
+        print("✅ Azan reagendado ao abrir (Firebase)");
+        return;
+      }
+
+      // 🔥 SE JÁ TEM DADOS EM CACHE, USA OS DADOS ACTUAIS
+      await NotificationService.cancelarAzan();
+      await _agendarTodosAzan(dados);
+      print("✅ Azan reagendado ao abrir (cache)");
+    } catch (e) {
+      print("❌ Erro ao reagendar azan: $e");
+    }
+  }
+
   bool _vibracaoAtiva = true;
   // 🔥 ZAKAT
-  final TextEditingController _zakatController = TextEditingController();
-  double? _resultadoZakat;
-  final List<AvisoModel> _avisos = [];
+
   List<Map<String, dynamic>> _listaAvisos = [];
   /*final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
     app: Firebase.app(),
@@ -268,12 +281,13 @@ class _HomePageState extends State<HomePage> {
     setState(() {});
   }
 
-  // 🔔 Guardar horários antigos de Jammah
-  final Map<String, String> _horariosJammahAntigos = {};
-
   @override
   void initState() {
     super.initState();
+    // 🔥 VERIFICAÇÃO DE VERSÃO OBRIGATÓRIA — PRIMEIRO DE TUDO
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _verificarVersaoMinima();
+    });
     _carregarFavoritos();
     _mesquitaSelecionada = "mesquita_quelimane";
     _pageController = PageController();
@@ -290,11 +304,12 @@ class _HomePageState extends State<HomePage> {
           ? "mesquitas/$_mesquitaSelecionada"
           : "app");
 
-      _appRef = FirebaseDatabase.instance.ref("app");
-
       _dbRef.keepSynced(true); // PARA OFFLINE
 
       _ouvirNuvem();
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _reagendarAzanSeNecessario();
+      });
     } catch (e) {
       print("🔥 Firebase indisponível (modo offline): $e");
     }
@@ -377,10 +392,6 @@ class _HomePageState extends State<HomePage> {
     //_pulseController.repeat(reverse: true);
 
     // 🔥 UM ÚNICO TIMER
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      _verificarMudancaDeDia();
-    });
   }
 
   @override
@@ -421,8 +432,17 @@ class _HomePageState extends State<HomePage> {
             });
           }
         });
+        //ordenacao de avisos
+        avisosTemp.sort((a, b) =>
+            _prioridadeAviso(a['tipo']).compareTo(_prioridadeAviso(b['tipo'])));
       }
-
+// ifatr e suhoor
+      if (dadosMap['maghrib_azan'] != null) {
+        dadosMap['iftar'] = dadosMap['maghrib_azan'];
+      }
+      if (dadosMap['sehri'] != null) {
+        dadosMap['suhoor'] = dadosMap['sehri'];
+      }
       // 🔥 AQUI ESTÁ A CORREÇÃO
       _verificarNovoAviso(avisosTemp);
       // _verificarMudancaHorarios(dadosMap);
@@ -435,6 +455,67 @@ class _HomePageState extends State<HomePage> {
       LocalStorageService.salvarDados(dadosMap);
       _verificarEReagendarAzan(dadosMap);
     });
+  }
+
+  Future<void> _verificarVersaoMinima() async {
+    try {
+      final snapshot =
+          await FirebaseDatabase.instance.ref("app/versao_minima").get();
+
+      final versaoMinima = snapshot.value?.toString() ?? "1.0.0";
+      final packageInfo = await PackageInfo.fromPlatform();
+      final versaoAtual = packageInfo.version;
+
+      // Compara versões ex: "1.0.1" < "1.0.2"
+      if (_compararVersoes(versaoAtual, versaoMinima) < 0) {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => PopScope(
+            canPop: false, // impede botão "back"
+            child: AlertDialog(
+              title: const Text("Actualização obrigatória"),
+              content: const Text(
+                "Uma nova versão está disponível. "
+                "Por favor actualiza o app para continuar.",
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: () => launchUrl(
+                    Uri.parse(
+                      "https://play.google.com/store/apps/details?id=com.mosque.now",
+                    ),
+                    mode: LaunchMode.externalApplication,
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0B3D2E),
+                  ),
+                  child: const Text(
+                    "Actualizar agora",
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print("⚠️ Erro ao verificar versão: $e");
+      // Se falhar (offline), deixa passar — não bloqueia o utilizador
+    }
+  }
+
+// Compara "1.0.1" com "1.0.2" → retorna negativo se a < b
+  int _compararVersoes(String a, String b) {
+    final pa = a.split('.').map(int.parse).toList();
+    final pb = b.split('.').map(int.parse).toList();
+    for (int i = 0; i < 3; i++) {
+      final diff = (pa.elementAtOrNull(i) ?? 0) - (pb.elementAtOrNull(i) ?? 0);
+      if (diff != 0) return diff;
+    }
+    return 0;
   }
 
   Future<void> _agendarTodosAzan(Map<String, dynamic> dadosMap) async {
@@ -484,6 +565,10 @@ class _HomePageState extends State<HomePage> {
   Future<void> _agendarTodosAzanSilencioso(
       Map<String, dynamic> dadosMap) async {
     if (dadosMap.isEmpty) return;
+
+    // VERIFICAÇÃO
+    final ativoAzan = await LocalStorageService.alarmeAzanAtivo();
+    if (!ativoAzan) return;
 
     final horarios = {
       "Fajr": dadosMap['fajr_azan'],
@@ -597,88 +682,6 @@ class _HomePageState extends State<HomePage> {
 
     await NotificationService.cancelarAzan();
     await _agendarTodosAzan(dadosMap);
-  }
-
-  Future<void> _verificarMudancaDeDia() async {
-    if (dados.isEmpty) return;
-
-    final agora = DateTime.now();
-
-    // 🔥 1. GARANTIR QUE TEMOS MAGHRIB REAL
-    String? maghribStr = dados['maghrib_azan'];
-
-    if (maghribStr == null || maghribStr.isEmpty) {
-      print("⚠️ Maghrib não disponível ainda");
-      return;
-    }
-
-    // 🔥 2. PARSE SEGURO
-    List<String> partes = maghribStr.split(':');
-    if (partes.length != 2) return;
-
-    final hour = int.tryParse(partes[0]);
-    final minute = int.tryParse(partes[1]);
-
-    if (hour == null || minute == null) return;
-
-    // 🔥 3. CRIAR DATA DO MAGHRIB
-    DateTime hojeMaghrib = DateTime(
-      agora.year,
-      agora.month,
-      agora.day,
-      hour,
-      minute,
-    );
-
-    // 🔒 AINDA NÃO CHEGOU MAGHRIB → NÃO FAZ NADA
-    if (agora.isBefore(hojeMaghrib)) return;
-
-    // 🔥 4. DATA FORMATADA
-    String hojeStr = "${agora.year.toString().padLeft(4, '0')}-"
-        "${agora.month.toString().padLeft(2, '0')}-"
-        "${agora.day.toString().padLeft(2, '0')}";
-
-    // 🔒 5. PROTEÇÃO LOCAL (evita múltiplas execuções)
-    if (_ultimaDataProcessada == hojeStr) return;
-
-    String? ultimaDataFirebase = dados['ultima_data_jejum'];
-
-    if (ultimaDataFirebase == hojeStr) {
-      _ultimaDataProcessada = hojeStr;
-      return;
-    }
-
-    print("🌙 Atualizando dia islâmico...");
-
-    // 🔥 7. INCREMENTAR DIA
-    int diaAtual = int.tryParse(dados['jejum']?.toString() ?? "1") ?? 1;
-
-    int novoDia = diaAtual + 1;
-
-    if (novoDia > 30) {
-      novoDia = 1;
-    }
-
-    try {
-      // 🔥 8. ATUALIZAR FIREBASE
-      await _dbRef.update({
-        'jejum': novoDia.toString(),
-        'ultima_data_jejum': hojeStr,
-      });
-
-      // 🔥 9. ATUALIZAR LOCAL
-      _ultimaDataProcessada = hojeStr;
-
-      print("✅ Dia atualizado para $novoDia");
-    } catch (e) {
-      print("❌ Erro ao atualizar dia: $e");
-    }
-  }
-
-  String _formatarData(DateTime data) {
-    return "${data.year.toString().padLeft(4, '0')}-"
-        "${data.month.toString().padLeft(2, '0')}-"
-        "${data.day.toString().padLeft(2, '0')}";
   }
 
   String _formatarDataHora(String dataIso) {
@@ -1305,8 +1308,7 @@ class _HomePageState extends State<HomePage> {
                   dados['dhuhr_namaz'] ?? "--:--"),
               _linha("Asr", dados['asr_azan'] ?? "--:--",
                   dados['asr_namaz'] ?? "--:--"),
-              _linha("Maghrib", dados['maghrib_azan'] ?? "--:--",
-                  dados['maghrib_namaz'] ?? "--:--"),
+              _linha("Maghrib", dados['maghrib_azan'] ?? "--:--", "Após Azan"),
               _linha("Isha", dados['isha_azan'] ?? "--:--",
                   dados['isha_namaz'] ?? "--:--"),
               _linha("Jummah", dados['jummah_azan'] ?? "--:--",
@@ -1665,7 +1667,6 @@ class CountdownCard extends StatefulWidget {
 class _CountdownCardState extends State<CountdownCard>
     with SingleTickerProviderStateMixin {
   Timer? _timer;
-  final String _ultimaDataProcessada = "";
   String _tempoRestante = "";
   String _proximaOracaoNome = "";
   String _proximaOracaoHora = "";
@@ -1739,6 +1740,7 @@ class _CountdownCardState extends State<CountdownCard>
       final iqamahStr = o['iqamah']?.toString();
 
       if (azanStr == null || iqamahStr == null) continue;
+      if (!azanStr.contains(':') || !iqamahStr.contains(':')) continue;
 
       final azanPartes = azanStr.split(':');
       final iqamahPartes = iqamahStr.split(':');

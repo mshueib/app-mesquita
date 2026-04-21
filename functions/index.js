@@ -1,4 +1,5 @@
 const { onValueWritten } = require("firebase-functions/v2/database");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
@@ -37,6 +38,7 @@ exports.enviarNotificacaoTrigger = onValueWritten(
             const bodyMsg = tipoOracao
                 ? `${nomeOracao} ${tipoOracao} → ${valor}`
                 : `${nomeOracao} → ${valor}`;
+
             const payload = {
                 notification: {
                     title: "🕌 Horário actualizado",
@@ -68,7 +70,6 @@ exports.enviarNotificacaoTrigger = onValueWritten(
 
             const result = await admin.messaging().send(payload);
 
-            // CORREÇÃO 1 — apagar trigger após enviar (evita acumulação)
             await event.data.after.ref.remove();
 
             return result;
@@ -79,6 +80,7 @@ exports.enviarNotificacaoTrigger = onValueWritten(
         }
     }
 );
+
 exports.notificarNovoAviso = onValueWritten(
     {
         ref: "/mesquitas/{mesquitaId}/avisos/{avisoId}",
@@ -88,10 +90,8 @@ exports.notificarNovoAviso = onValueWritten(
         try {
             const after = event.data.after;
 
-            // só dispara ao criar — ignora apagar
             if (!after.exists()) return null;
 
-            // ignora se já existia (update)
             const before = event.data.before;
             if (before.exists()) return null;
 
@@ -103,17 +103,14 @@ exports.notificarNovoAviso = onValueWritten(
 
             if (!texto) return null;
 
-            // título por tipo
             const titulos = {
                 janazah: "🕌 Janazah",
                 nikah: "💍 Nikah",
                 geral: "📢 Novo Aviso",
             };
-            const title = titulos[tipo]
-                ?? "📢 Novo Aviso";
+            const title = titulos[tipo] ?? "📢 Novo Aviso";
 
-            console.log("📡 Enviando aviso FCM:",
-                tipo, texto);
+            console.log("📡 Enviando aviso FCM:", tipo, texto);
 
             const payload = {
                 notification: {
@@ -148,9 +145,64 @@ exports.notificarNovoAviso = onValueWritten(
             return await admin.messaging().send(payload);
 
         } catch (error) {
-            console.error("❌ Erro ao enviar aviso:",
-                error);
+            console.error("❌ Erro ao enviar aviso:", error);
             return null;
+        }
+    }
+);
+
+exports.incrementarDiaIslamico = onSchedule(
+    {
+        schedule: "every 1 hours",
+        timeZone: "Africa/Maputo",
+        region: "europe-west1",
+    },
+    async () => {
+        try {
+            const snapshot = await admin.database()
+                .ref("mesquitas").get();
+
+            if (!snapshot.exists()) return;
+
+            const agora = new Date();
+            const hojeStr = agora.toISOString().split('T')[0];
+            const mesquitas = snapshot.val();
+
+            for (const [id, dados] of Object.entries(mesquitas)) {
+                if (dados.ultima_data_jejum === hojeStr) {
+                    console.log(`✅ ${id} já actualizado hoje`);
+                    continue;
+                }
+
+                const maghribStr = dados.maghrib_azan;
+                if (!maghribStr || !maghribStr.includes(':')) continue;
+
+                const [maghribHour, maghribMin] = maghribStr
+                    .split(':').map(Number);
+
+                const maghrib = new Date();
+                maghrib.setHours(maghribHour, maghribMin, 0, 0);
+
+                if (agora < maghrib) {
+                    console.log(`⏳ ${id} — Maghrib ainda não chegou`);
+                    continue;
+                }
+
+                let diaAtual = parseInt(dados.jejum) || 1;
+                let novoDia = diaAtual + 1;
+                if (novoDia > 30) novoDia = 1;
+
+                await admin.database()
+                    .ref(`mesquitas/${id}`)
+                    .update({
+                        jejum: novoDia.toString(),
+                        ultima_data_jejum: hojeStr,
+                    });
+
+                console.log(`✅ ${id} — Dia actualizado: ${novoDia}`);
+            }
+        } catch (error) {
+            console.error("❌ Erro:", error);
         }
     }
 );

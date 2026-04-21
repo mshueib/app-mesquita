@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'registo_mesquita_page.dart';
 
 class MesquitasPage extends StatefulWidget {
   final Function(String) onSelecionar;

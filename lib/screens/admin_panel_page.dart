@@ -239,6 +239,12 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     // 🔥 ADICIONE ESTA LINHA
     dados['ultima_atualizacao_salat'] = DateTime.now().toIso8601String();
 
+    // impede que _verificarMudancaDeDia() incremente o dia automaticamente
+    final agora = DateTime.now();
+    dados['ultima_data_jejum'] = "${agora.year.toString().padLeft(4, '0')}-"
+        "${agora.month.toString().padLeft(2, '0')}-"
+        "${agora.day.toString().padLeft(2, '0')}";
+
     await widget.dbRef.update(dados);
     final idMesquita = widget.dbRef.key;
     String campoAlterado = "horarios";
@@ -246,8 +252,9 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
 
     for (var entry in dados.entries) {
       final campo = entry.key;
-      if (campo == "ultima_atualizacao_salat" || campo == "orador_jummah")
+      if (campo == "ultima_atualizacao_salat" || campo == "orador_jummah") {
         continue;
+      }
       final antigoValor = _valoresAntigos[campo] ?? "";
       if (entry.value.toString() != antigoValor) {
         campoAlterado = campo;
@@ -480,20 +487,23 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
 
             // 🔽 DIA 1–30 DROPDOWN
             DropdownButtonFormField<String>(
+              key: ValueKey(_ctrl['jejum']!.text),
               initialValue:
                   _ctrl['jejum']!.text.isNotEmpty ? _ctrl['jejum']!.text : null,
               items: List.generate(
                 30,
                 (index) => DropdownMenuItem(
                   value: (index + 1).toString(),
-                  child: Text((index + 1).toString()),
+                  child: Text("Dia ${(index + 1).toString()}"),
                 ),
               ),
               onChanged: (v) {
-                _ctrl['jejum']!.text = v ?? "";
+                setState(() {
+                  _ctrl['jejum']!.text = v ?? "";
+                });
               },
               decoration: InputDecoration(
-                labelText: "Dia",
+                labelText: "Dia do Mês Islâmico",
                 filled: true,
                 fillColor: Colors.white,
                 border: OutlineInputBorder(

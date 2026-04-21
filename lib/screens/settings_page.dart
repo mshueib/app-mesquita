@@ -80,7 +80,7 @@ class _SettingsPageState extends State<SettingsPage> {
         trailing: Switch(
           value: value,
           onChanged: onChanged,
-          activeColor: const Color(0xFF0B3D2E),
+          activeThumbColor: const Color(0xFF0B3D2E),
         ),
       ),
     );
