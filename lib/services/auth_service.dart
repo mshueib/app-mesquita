@@ -3,14 +3,22 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class AuthService {
-  static Future<bool> login(String pinDigitado) async {
+  static Future<bool> login(String pinDigitado) {
+    return _loginComPin("app/admin_pin", pinDigitado);
+  }
+
+  static Future<bool> loginSuperAdmin(String pinDigitado) {
+    return _loginComPin("app/super_admin_pin", pinDigitado);
+  }
+
+  static Future<bool> _loginComPin(String caminhoPin, String pinDigitado) async {
     try {
       // 1️⃣ Buscar PIN do Firebase
       final ref = FirebaseDatabase.instanceFor(
         app: Firebase.app(),
         databaseURL:
             'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/',
-      ).ref("app/admin_pin");
+      ).ref(caminhoPin);
 
       final snapshot = await ref.get();
 

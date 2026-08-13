@@ -1,5 +1,39 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_database/firebase_database.dart';
+import '../services/auth_service.dart';
+import '../services/mesquita_registo_service.dart';
+import 'admin_login_page.dart';
+
+/// Protege [PedidosPage] com o PIN de super-admin (app/super_admin_pin),
+/// reutilizando o mesmo AdminLoginPage usado no admin de cada mesquita.
+class SuperAdminGatewayPage extends StatefulWidget {
+  const SuperAdminGatewayPage({super.key});
+
+  @override
+  State<SuperAdminGatewayPage> createState() => _SuperAdminGatewayPageState();
+}
+
+class _SuperAdminGatewayPageState extends State<SuperAdminGatewayPage> {
+  bool _autenticado = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_autenticado) return const PedidosPage();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF4F1EA),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0B3D2E),
+        title: const Text("Super Admin", style: TextStyle(color: Colors.white)),
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: AdminLoginPage(
+        titulo: "Acesso Super Admin",
+        loginFn: AuthService.loginSuperAdmin,
+        onSuccess: () => setState(() => _autenticado = true),
+      ),
+    );
+  }
+}
 
 class PedidosPage extends StatefulWidget {
   const PedidosPage({super.key});
@@ -29,43 +63,14 @@ class _PedidosPageState extends State<PedidosPage>
     super.dispose();
   }
 
-  void _carregar() async {
-    final snapshot =
-        await FirebaseDatabase.instance.ref("pedidos_registo").get();
+  Future<void> _carregar() async {
+    setState(() => _carregando = true);
 
-    if (!snapshot.exists) {
-      setState(() => _carregando = false);
-      return;
-    }
+    final pendentes = await MesquitaRegistoService.listarPendentes();
+    final aprovados = await MesquitaRegistoService.listarAprovadas();
+    final rejeitados = await MesquitaRegistoService.listarRejeitados();
 
-    final data = Map<String, dynamic>.from(snapshot.value as Map);
-    List<Map<String, dynamic>> pendentes = [];
-    List<Map<String, dynamic>> aprovados = [];
-    List<Map<String, dynamic>> rejeitados = [];
-
-    data.forEach((key, value) {
-      final item = Map<String, dynamic>.from(value);
-      item['id'] = key;
-      switch (item['status']) {
-        case 'aprovado':
-          aprovados.add(item);
-          break;
-        case 'rejeitado':
-          rejeitados.add(item);
-          break;
-        default:
-          pendentes.add(item);
-      }
-    });
-
-    // ordenar por timestamp mais recente
-    pendentes
-        .sort((a, b) => (b['timestamp'] ?? 0).compareTo(a['timestamp'] ?? 0));
-    aprovados
-        .sort((a, b) => (b['timestamp'] ?? 0).compareTo(a['timestamp'] ?? 0));
-    rejeitados
-        .sort((a, b) => (b['timestamp'] ?? 0).compareTo(a['timestamp'] ?? 0));
-
+    if (!mounted) return;
     setState(() {
       _pendentes = pendentes;
       _aprovados = aprovados;
@@ -75,47 +80,16 @@ class _PedidosPageState extends State<PedidosPage>
   }
 
   Future<void> _aprovar(Map<String, dynamic> pedido) async {
-    // mostrar dialogo para definir password e ID da mesquita
-    final idCtrl = TextEditingController(
-      text: pedido['nome'].toString().toLowerCase().replaceAll(' ', '_'),
-    );
-    final passwordCtrl = TextEditingController();
+    final mesquita = Map<String, dynamic>.from(pedido['mesquita'] ?? {});
 
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Aprovar Mesquita"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              "Mesquita: ${pedido['nome']}",
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: idCtrl,
-              decoration: InputDecoration(
-                labelText: "ID da mesquita",
-                hintText: "ex: masjid_maputo",
-                helperText: "Identificador único, sem espaços",
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: passwordCtrl,
-              obscureText: true,
-              decoration: InputDecoration(
-                labelText: "Password temporária para o admin",
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
-          ],
+        content: Text(
+          "Aprovar o registo de \"${mesquita['nome'] ?? ''}\"?\n\n"
+          "A mesquita passará a aparecer na pesquisa e o requerente poderá "
+          "aceder ao painel de administração com as credenciais criadas no registo.",
         ),
         actions: [
           TextButton(
@@ -124,9 +98,7 @@ class _PedidosPageState extends State<PedidosPage>
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0B3D2E),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0B3D2E)),
             child: const Text("Aprovar", style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -135,86 +107,28 @@ class _PedidosPageState extends State<PedidosPage>
 
     if (confirmar != true) return;
 
-    if (idCtrl.text.trim().isEmpty || passwordCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Preenche o ID e a password"),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
     try {
-      final mesquitaId = idCtrl.text.trim();
-      final email = pedido['email'];
+      await MesquitaRegistoService.aprovar(pedido['id'], pedido);
 
-      // criar nó da mesquita
-      await FirebaseDatabase.instance.ref("mesquitas/$mesquitaId").set({
-        "nome": pedido['nome'],
-        "cidade": pedido['cidade'],
-        "pais": pedido['pais'] ?? "",
-        "status": "ativo",
-        "email_admin": email,
-        "fajr_azan": "--:--",
-        "fajr_namaz": "--:--",
-        "dhuhr_azan": "--:--",
-        "dhuhr_namaz": "--:--",
-        "asr_azan": "--:--",
-        "asr_namaz": "--:--",
-        "maghrib_azan": "--:--",
-        "maghrib_namaz": "--:--",
-        "isha_azan": "--:--",
-        "isha_namaz": "--:--",
-        "jummah_azan": "--:--",
-        "jummah_namaz": "--:--",
-        "mes_islamico": "",
-        "ano_islamico": "1447",
-        "jejum": "1",
-        "sehri": "--:--",
-        "iftar": "--:--",
-        "orador_jummah": "",
-        "nissab_valor": "0",
-      });
-
-      // guardar credenciais do admin da mesquita
-      await FirebaseDatabase.instance.ref("admins_mesquita/$mesquitaId").set({
-        "email": email,
-        "password": passwordCtrl.text.trim(),
-        "mesquita_id": mesquitaId,
-        "nome_mesquita": pedido['nome'],
-        "ativo": true,
-      });
-
-      // actualizar status do pedido
-      await FirebaseDatabase.instance
-          .ref("pedidos_registo/${pedido['id']}")
-          .update({
-        "status": "aprovado",
-        "mesquita_id": mesquitaId,
-        "data_aprovacao": DateTime.now().millisecondsSinceEpoch,
-      });
-
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("${pedido['nome']} aprovada com sucesso!"),
+          content: Text("${mesquita['nome'] ?? 'Mesquita'} aprovada com sucesso!"),
           backgroundColor: Colors.green,
         ),
       );
-
       _carregar();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Erro: $e"),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text("Erro ao aprovar: $e"), backgroundColor: Colors.red),
       );
     }
   }
 
   Future<void> _rejeitar(Map<String, dynamic> pedido) async {
     final motivoCtrl = TextEditingController();
+    final mesquita = Map<String, dynamic>.from(pedido['mesquita'] ?? {});
 
     final confirmar = await showDialog<bool>(
       context: context,
@@ -223,16 +137,14 @@ class _PedidosPageState extends State<PedidosPage>
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text("Rejeitar: ${pedido['nome']}"),
+            Text("Rejeitar: ${mesquita['nome'] ?? ''}"),
             const SizedBox(height: 12),
             TextField(
               controller: motivoCtrl,
               maxLines: 2,
               decoration: InputDecoration(
                 labelText: "Motivo (opcional)",
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
           ],
@@ -245,8 +157,7 @@ class _PedidosPageState extends State<PedidosPage>
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child:
-                const Text("Rejeitar", style: TextStyle(color: Colors.white)),
+            child: const Text("Rejeitar", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -254,30 +165,34 @@ class _PedidosPageState extends State<PedidosPage>
 
     if (confirmar != true) return;
 
-    await FirebaseDatabase.instance
-        .ref("pedidos_registo/${pedido['id']}")
-        .update({
-      "status": "rejeitado",
-      "motivo_rejeicao": motivoCtrl.text.trim(),
-      "data_rejeicao": DateTime.now().millisecondsSinceEpoch,
-    });
+    try {
+      await MesquitaRegistoService.rejeitar(pedido['id'], motivo: motivoCtrl.text.trim());
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Pedido rejeitado"),
-        backgroundColor: Colors.orange,
-      ),
-    );
-
-    _carregar();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Pedido rejeitado"), backgroundColor: Colors.orange),
+      );
+      _carregar();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Erro ao rejeitar: $e"), backgroundColor: Colors.red),
+      );
+    }
   }
 
   Widget _cartao(Map<String, dynamic> p, {bool pendente = false}) {
+    final requerente = Map<String, dynamic>.from(p['requerente'] ?? {});
+    final localizacao = Map<String, dynamic>.from(p['localizacao'] ?? {});
+    final mesquita = Map<String, dynamic>.from(p['mesquita'] ?? {});
+
+    final nome = mesquita['nome'] ?? p['nome'] ?? "";
+    final cidade = localizacao['cidade'] ?? p['cidade'] ?? "";
+    final pais = localizacao['pais'] ?? p['pais'] ?? "";
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -292,25 +207,19 @@ class _PedidosPageState extends State<PedidosPage>
                     color: const Color(0xFF0B3D2E).withOpacity(0.08),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.mosque,
-                      color: Color(0xFF0B3D2E), size: 20),
+                  child: const Icon(Icons.mosque, color: Color(0xFF0B3D2E), size: 20),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Text(nome,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 14)),
                       Text(
-                        p['nome'] ?? "",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        "${p['cidade'] ?? ''}${p['pais'] != null && p['pais'].isNotEmpty ? ', ${p['pais']}' : ''}",
-                        style:
-                            const TextStyle(fontSize: 12, color: Colors.grey),
+                        "$cidade${pais.toString().isNotEmpty ? ', $pais' : ''}",
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     ],
                   ),
@@ -318,10 +227,18 @@ class _PedidosPageState extends State<PedidosPage>
               ],
             ),
             const SizedBox(height: 10),
-            _info(Icons.email_outlined, p['email'] ?? ""),
-            _info(Icons.phone_outlined, p['telefone'] ?? ""),
-            if (p['mensagem'] != null && p['mensagem'].isNotEmpty)
-              _info(Icons.message_outlined, p['mensagem']),
+            if (requerente.isNotEmpty) ...[
+              _info(Icons.person_outline,
+                  "${requerente['nome'] ?? ''} — ${requerente['cargo'] ?? ''}"),
+              _info(Icons.email_outlined, requerente['email'] ?? ""),
+              _info(Icons.phone_outlined, requerente['telefone'] ?? ""),
+            ],
+            if (mesquita['contacto'] != null &&
+                mesquita['contacto'].toString().isNotEmpty)
+              _info(Icons.chat_outlined, "Contacto da mesquita: ${mesquita['contacto']}"),
+            if (p['motivo_rejeicao'] != null &&
+                p['motivo_rejeicao'].toString().isNotEmpty)
+              _info(Icons.info_outline, "Motivo: ${p['motivo_rejeicao']}"),
             if (pendente) ...[
               const SizedBox(height: 12),
               Row(
@@ -332,11 +249,10 @@ class _PedidosPageState extends State<PedidosPage>
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: Colors.red),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
+                            borderRadius: BorderRadius.circular(10)),
                       ),
-                      child: const Text("Rejeitar",
-                          style: TextStyle(color: Colors.red)),
+                      child:
+                          const Text("Rejeitar", style: TextStyle(color: Colors.red)),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -346,8 +262,7 @@ class _PedidosPageState extends State<PedidosPage>
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0B3D2E),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
+                            borderRadius: BorderRadius.circular(10)),
                       ),
                       child: const Text("Aprovar",
                           style: TextStyle(color: Colors.white)),
@@ -363,6 +278,7 @@ class _PedidosPageState extends State<PedidosPage>
   }
 
   Widget _info(IconData icon, String texto) {
+    if (texto.trim().isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Row(
@@ -370,10 +286,7 @@ class _PedidosPageState extends State<PedidosPage>
           Icon(icon, size: 14, color: Colors.grey),
           const SizedBox(width: 6),
           Expanded(
-            child: Text(
-              texto,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-            ),
+            child: Text(texto, style: const TextStyle(fontSize: 12, color: Colors.grey)),
           ),
         ],
       ),
@@ -388,10 +301,7 @@ class _PedidosPageState extends State<PedidosPage>
           children: [
             Icon(Icons.inbox_outlined, size: 48, color: Colors.grey[300]),
             const SizedBox(height: 12),
-            Text(
-              "Sem pedidos",
-              style: TextStyle(color: Colors.grey[400]),
-            ),
+            Text("Sem pedidos", style: TextStyle(color: Colors.grey[400])),
           ],
         ),
       );
@@ -411,13 +321,7 @@ class _PedidosPageState extends State<PedidosPage>
         foregroundColor: Colors.white,
         title: const Text("Pedidos de Registo"),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              setState(() => _carregando = true);
-              _carregar();
-            },
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _carregar),
         ],
         bottom: TabBar(
           controller: _tabController,
@@ -433,8 +337,8 @@ class _PedidosPageState extends State<PedidosPage>
                   if (_pendentes.isNotEmpty) ...[
                     const SizedBox(width: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: const Color(0xFFD4AF37),
                         borderRadius: BorderRadius.circular(10),

@@ -65,7 +65,8 @@ exports.enviarNotificacaoTrigger = onValueWritten(
                         },
                     },
                 },
-                topic: "mesquita",
+                // Só chega a quem tem esta mesquita marcada como favorita.
+                topic: `mesquita_${event.params.mesquitaId}`,
             };
 
             const result = await admin.messaging().send(payload);
@@ -139,7 +140,8 @@ exports.notificarNovoAviso = onValueWritten(
                         },
                     },
                 },
-                topic: "mesquita",
+                // Só chega a quem tem esta mesquita marcada como favorita.
+                topic: `mesquita_${event.params.mesquitaId}`,
             };
 
             return await admin.messaging().send(payload);

@@ -6,21 +6,16 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:overlay_support/overlay_support.dart';
 import 'dart:async';
 import 'firebase_options.dart';
-import 'package:flutter/services.dart';
 import 'services/notification_service.dart';
-import 'screens/admin_login_page.dart';
-import 'screens/admin_panel_page.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:permission_handler/permission_handler.dart';
-import 'screens/qibla_page.dart';
-import 'screens/zakat_page.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'services/local_storage_service.dart';
-import 'screens/developer_page.dart';
 import 'screens/audio_page.dart';
 import 'screens/mesquitas_page.dart';
 import 'screens/settings_page.dart';
+import 'screens/mais_page.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -112,8 +107,8 @@ void main() async {
     FirebaseMessaging.instance.getToken().then((token) {
       print("🔥 TOKEN: $token");
     });
-
-    FirebaseMessaging.instance.subscribeToTopic("mesquita");
+    // 🔥 Notificações agora são por mesquita (ver _sincronizarTopicosFavoritos)
+    // — só chegam a quem tem essa mesquita marcada como favorita.
   } catch (e) {
     print("🔥 FCM offline: $e");
   }
@@ -150,7 +145,6 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription? _dbSub;
   late DatabaseReference _dbRef;
   int _indiceAtual = 0;
-  bool _isAdminAutenticado = false;
   late PageController _pageController;
   Map<String, String> _horariosAzanAnteriores = {};
   Timer? _timer;
@@ -165,7 +159,6 @@ class _HomePageState extends State<HomePage> {
   String _proximaOracaoNome = "";
 
   List<String> _idsAvisosNotificados = [];
-  int _contadorTasbih = 0;
   int _prioridadeAviso(String tipo) {
     switch (tipo) {
       case 'janazah':
@@ -243,9 +236,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  bool _vibracaoAtiva = true;
-  // 🔥 ZAKAT
-
   List<Map<String, dynamic>> _listaAvisos = [];
   /*final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
     app: Firebase.app(),
@@ -258,7 +248,15 @@ class _HomePageState extends State<HomePage> {
   List<String> _favoritos = [];
 
   Future<void> _carregarFavoritos() async {
-    final favs = await LocalStorageService.carregarFavoritos();
+    var favs = await LocalStorageService.carregarFavoritos();
+
+    // 🔥 MIGRAÇÃO — utilizadores que já usavam a app antes dos favoritos
+    // por mesquita não podem deixar de receber notificações sem agir.
+    if (favs.isEmpty && !await LocalStorageService.migracaoFavoritosFeita()) {
+      favs = ["mesquita_quelimane"];
+      await LocalStorageService.salvarFavoritos(favs);
+      await LocalStorageService.setMigracaoFavoritosFeita();
+    }
 
     setState(() {
       _favoritos = favs;
@@ -267,13 +265,21 @@ class _HomePageState extends State<HomePage> {
     if (_favoritos.isNotEmpty) {
       _mesquitaSelecionada = _favoritos.first;
     }
+
+    // Reconfirma as subscrições FCM em cada arranque (subscribeToTopic
+    // é idempotente e não sobrevive garantidamente a reinstalações).
+    for (final id in _favoritos) {
+      NotificationService.subscreverMesquita(id);
+    }
   }
 
   Future<void> _toggleFavorito(String id) async {
     if (_favoritos.contains(id)) {
       _favoritos.remove(id);
+      await NotificationService.dessubscreverMesquita(id);
     } else {
       _favoritos.add(id);
+      await NotificationService.subscreverMesquita(id);
     }
 
     await LocalStorageService.salvarFavoritos(_favoritos);
@@ -582,8 +588,9 @@ class _HomePageState extends State<HomePage> {
       final nome = entry.key;
       final horaStr = entry.value?.toString();
 
-      if (horaStr == null || horaStr.isEmpty || !horaStr.contains(':'))
+      if (horaStr == null || horaStr.isEmpty || !horaStr.contains(':')) {
         continue;
+      }
 
       final partes = horaStr.split(':');
       if (partes.length != 2) continue;
@@ -646,7 +653,7 @@ class _HomePageState extends State<HomePage> {
     String? novoHorario;
 
     for (var entry in novosHorarios.entries) {
-      if (entry.value == null || entry.value.isEmpty) continue;
+      if (entry.value.isEmpty) continue;
       if (_horariosAzanAnteriores[entry.key] != entry.value) {
         houveAlteracao = true;
 
@@ -730,27 +737,7 @@ class _HomePageState extends State<HomePage> {
       _paginaInicio(),
       _paginaAvisos(),
       const AudioPage(),
-      _paginaTasbih(),
-      ZakatPage(
-        nissabAdmin:
-            double.tryParse(dados['nissab_valor']?.toString() ?? "0") ?? 0,
-      ),
-      const QiblaPage(),
-      _isAdminAutenticado
-          ? AdminPanelPage(
-              dbRef: _dbRef,
-              dadosAtuais: dados,
-              onLogout: () {
-                setState(() {
-                  _isAdminAutenticado = false;
-                  _indiceAtual = 0;
-                });
-              },
-            )
-          : AdminLoginPage(
-              onSuccess: () => setState(() => _isAdminAutenticado = true),
-            ),
-      const DeveloperPage(),
+      MaisPage(dbRef: _dbRef, dados: dados),
     ];
 
     return Scaffold(
@@ -886,22 +873,8 @@ class _HomePageState extends State<HomePage> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: "Início"),
           BottomNavigationBarItem(icon: Icon(Icons.info), label: "Avisos"),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.radio),
-            label: "Audio",
-          ),
-          BottomNavigationBarItem(icon: Icon(Icons.touch_app), label: "Tasbih"),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.calculate),
-            label: "Zakat",
-          ),
-          BottomNavigationBarItem(icon: Icon(Icons.explore), label: "Qibla"),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.admin_panel_settings), label: "Admin"),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.info_outline),
-            label: "Sobre",
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.radio), label: "Áudio"),
+          BottomNavigationBarItem(icon: Icon(Icons.apps), label: "Mais"),
         ],
       ),
     );
@@ -1510,144 +1483,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _paginaTasbih() {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () async {
-        setState(() {
-          _contadorTasbih++;
-        });
-
-        if (!_vibracaoAtiva) return;
-
-        // Vibração normal
-        HapticFeedback.lightImpact();
-
-        // Vibração especial ao atingir 100
-        if (_contadorTasbih % 100 == 0) {
-          await Future.delayed(const Duration(milliseconds: 50));
-          HapticFeedback.heavyImpact();
-        }
-      },
-      child: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Color(0xFF0B3D2E),
-              Color(0xFF145A32),
-              Color(0xFF0B3D2E),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Stack(
-          children: [
-            // 🔥 PADRÃO CÍRCULO SUAVE NO FUNDO
-            Center(
-              child: Container(
-                width: 280,
-                height: 280,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Color(0xFFD4AF37).withOpacity(0.2),
-                    width: 4,
-                  ),
-                ),
-              ),
-            ),
-
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // 🔥 TOGGLE VIBRAÇÃO
-                SwitchListTile(
-                  value: _vibracaoAtiva,
-                  onChanged: (v) {
-                    setState(() {
-                      _vibracaoAtiva = v;
-                    });
-                  },
-                  title: const Text(
-                    "Vibração",
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  activeThumbColor: const Color(0xFFD4AF37),
-                ),
-
-                const SizedBox(height: 30),
-
-                const Text(
-                  "Tasbih",
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 22,
-                    letterSpacing: 2,
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 150),
-                  transitionBuilder: (child, animation) =>
-                      ScaleTransition(scale: animation, child: child),
-                  child: Text(
-                    '$_contadorTasbih',
-                    key: ValueKey(_contadorTasbih),
-                    style: const TextStyle(
-                      fontSize: 90,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFFD4AF37),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 40),
-
-                ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      _contadorTasbih = 0;
-                    });
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFD4AF37),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 40, vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                  ),
-                  child: const Text(
-                    "RESET",
-                    style: TextStyle(
-                      color: Color(0xFF0B3D2E),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 15),
-
-                const Text(
-                  "Toque em qualquer parte da tela para contar",
-                  style: TextStyle(
-                    color: Colors.white60,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class CountdownCard extends StatefulWidget {

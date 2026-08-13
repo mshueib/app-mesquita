@@ -1,7 +1,19 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:timezone/timezone.dart' as tz;
 
 class NotificationService {
+  /// Notificações (horários, avisos) só chegam a mesquitas marcadas
+  /// como favoritas — cada mesquita tem o seu próprio tópico FCM.
+  static Future<void> subscreverMesquita(String mesquitaId) {
+    return FirebaseMessaging.instance.subscribeToTopic('mesquita_$mesquitaId');
+  }
+
+  static Future<void> dessubscreverMesquita(String mesquitaId) {
+    return FirebaseMessaging.instance
+        .unsubscribeFromTopic('mesquita_$mesquitaId');
+  }
+
   static const Map<String, int> azanIds = {
     "Fajr": 501,
     "Dhuhr": 502,

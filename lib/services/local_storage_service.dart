@@ -68,6 +68,16 @@ class LocalStorageService {
     await prefs.setBool('notif_avisos', value);
   }
 
+  static Future<bool> migracaoFavoritosFeita() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('migracao_favoritos_fcm_v1') ?? false;
+  }
+
+  static Future<void> setMigracaoFavoritosFeita() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('migracao_favoritos_fcm_v1', true);
+  }
+
   static Future<bool> alarmeAzanAtivo() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool('alarme_azan') ?? true;

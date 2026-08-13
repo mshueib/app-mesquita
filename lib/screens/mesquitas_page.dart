@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'mesquita_registo_page.dart';
 
 class MesquitasPage extends StatefulWidget {
   final Function(String) onSelecionar;
@@ -65,6 +66,55 @@ class _MesquitasPageState extends State<MesquitasPage> {
     });
   }
 
+  void _abrirRegisto() {
+    final termo = _searchCtrl.text.trim();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MesquitaRegistoPage(
+          nomeInicial: termo.isNotEmpty ? termo : null,
+        ),
+      ),
+    );
+  }
+
+  Widget _semResultados() {
+    final termo = _searchCtrl.text.trim();
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.search_off, size: 44, color: Colors.grey[400]),
+            const SizedBox(height: 12),
+            const Text(
+              "Nenhuma mesquita encontrada",
+              style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: _abrirRegisto,
+              icon: const Icon(Icons.add_business),
+              label: Text(
+                termo.isNotEmpty ? 'Registar "$termo"' : "Registar esta mesquita",
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0B3D2E),
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -99,62 +149,47 @@ class _MesquitasPageState extends State<MesquitasPage> {
       ),
       body: Column(
         children: [
-          // banner "brevemente disponível" no topo
-          Container(
-            width: double.infinity,
-            margin: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF8E1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: const Color(0xFFD4AF37),
-                width: 0.8,
+          // banner para registar mesquita
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: _abrirRegisto,
+            child: Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFFD4AF37),
+                  width: 0.8,
+                ),
               ),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.add_business,
-                    color: Color(0xFFB8860B), size: 18),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Text(
-                    "Registar a sua mesquita — brevemente disponível",
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF8B6F00),
-                      fontWeight: FontWeight.w500,
+              child: Row(
+                children: [
+                  const Icon(Icons.add_business,
+                      color: Color(0xFFB8860B), size: 18),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      "Não encontrou a sua mesquita? Registar aqui",
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF8B6F00),
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFD4AF37),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text(
-                    "Em breve",
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ],
+                  const Icon(Icons.chevron_right,
+                      color: Color(0xFFB8860B), size: 18),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 8),
           Expanded(
             child: _filtradas.isEmpty
-                ? const Center(
-                    child: Text(
-                      "Nenhuma mesquita encontrada",
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  )
+                ? _semResultados()
                 : ListView.builder(
                     padding:
                         const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
