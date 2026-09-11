@@ -1,0 +1,140 @@
+{
+  "itens": [
+    {
+      "colecao": "bukhari",
+      "secao": 1,
+      "numero": 1,
+      "tema": "As Ações Valem pelas Intenções",
+      "arabe": "إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ، وَإِنَّمَا لِكُلِّ امْرِئٍ مَا نَوَى، فَمَنْ كَانَتْ هِجْرَتُهُ إِلَى دُنْيَا يُصِيبُهَا أَوْ إِلَى امْرَأَةٍ يَنْكِحُهَا، فَهِجْرَتُهُ إِلَى مَا هَاجَرَ إِلَيْهِ",
+      "traducaoPt": "As ações valem pelas intenções, e cada um terá aquilo que tiver tencionado. Quem emigrar por um motivo mundano que deseja alcançar, ou por uma mulher com quem quer casar, a sua emigração será para aquilo por que emigrou."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 8,
+      "tema": "Os Cinco Pilares do Islão",
+      "arabe": "بُنِيَ الإِسْلاَمُ عَلَى خَمْسٍ شَهَادَةِ أَنْ لاَ إِلَهَ إِلاَّ اللَّهُ وَأَنَّ مُحَمَّدًا رَسُولُ اللَّهِ، وَإِقَامِ الصَّلاَةِ، وَإِيتَاءِ الزَّكَاةِ، وَالْحَجِّ، وَصَوْمِ رَمَضَانَ",
+      "traducaoPt": "O Islão foi edificado sobre cinco pilares: o testemunho de que não há divindade digna de adoração senão Allah e que Muhammad é o Mensageiro de Allah; o cumprimento da oração (Salat); a entrega da caridade obrigatória (Zakat); a peregrinação (Hajj); e o jejum do Ramadão."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 9,
+      "tema": "Os Ramos da Fé",
+      "arabe": "الإِيمَانُ بِضْعٌ وَسِتُّونَ شُعْبَةً، وَالْحَيَاءُ شُعْبَةٌ مِنَ الإِيمَانِ",
+      "traducaoPt": "A fé tem mais de sessenta ramos, e o pudor (al-haya) é um ramo da fé."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 13,
+      "tema": "O Amor pelo Próximo",
+      "arabe": "لا يُؤْمِنُ أَحَدُكُمْ حَتَّى يُحِبَّ لأَخِيهِ مَا يُحِبُّ لِنَفْسِهِ",
+      "traducaoPt": "Nenhum de vós crê verdadeiramente até que deseje para o seu irmão o que deseja para si mesmo."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 15,
+      "tema": "O Amor pelo Profeta",
+      "arabe": "لاَ يُؤْمِنُ أَحَدُكُمْ حَتَّى أَكُونَ أَحَبَّ إِلَيْهِ مِنْ وَالِدِهِ وَوَلَدِهِ وَالنَّاسِ أَجْمَعِينَ",
+      "traducaoPt": "Nenhum de vós crê verdadeiramente até que eu lhe seja mais querido do que o seu pai, o seu filho e todas as pessoas."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 39,
+      "tema": "A Religião é Fácil",
+      "arabe": "إِنَّ الدِّينَ يُسْرٌ، وَلَنْ يُشَادَّ الدِّينَ أَحَدٌ إِلاَّ غَلَبَهُ، فَسَدِّدُوا وَقَارِبُوا وَأَبْشِرُوا، وَاسْتَعِينُوا بِالْغَدْوَةِ وَالرَّوْحَةِ وَشَىْءٍ مِنَ الدُّلْجَةِ",
+      "traducaoPt": "Na verdade, a religião é fácil, e ninguém se esforça em excesso contra ela sem que ela o vença. Por isso, sede corretos, aproximai-vos (da perfeição) e alegrai-vos, e buscai ajuda (na adoração) de manhã, à tarde e em parte da noite."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 44,
+      "tema": "A Misericórdia para Quem Tem um Pouco de Bem no Coração",
+      "arabe": "يَخْرُجُ مِنَ النَّارِ مَنْ قَالَ لاَ إِلَهَ إِلاَّ اللَّهُ، وَفِي قَلْبِهِ وَزْنُ شَعِيرَةٍ مِنْ خَيْرٍ، وَيَخْرُجُ مِنَ النَّارِ مَنْ قَالَ لاَ إِلَهَ إِلاَّ اللَّهُ، وَفِي قَلْبِهِ وَزْنُ بُرَّةٍ مِنْ خَيْرٍ، وَيَخْرُجُ مِنَ النَّارِ مَنْ قَالَ لاَ إِلَهَ إِلاَّ اللَّهُ، وَفِي قَلْبِهِ وَزْنُ ذَرَّةٍ مِنْ خَيْرٍ",
+      "traducaoPt": "Sairá do Fogo quem disser \"Não há divindade digna de adoração senão Allah\" e tiver no coração o peso de um grão de cevada de bem; sairá do Fogo quem disser \"Não há divindade digna de adoração senão Allah\" e tiver no coração o peso de um grão de trigo de bem; e sairá do Fogo quem disser \"Não há divindade digna de adoração senão Allah\" e tiver no coração o peso de um átomo de bem."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 11,
+      "tema": "O Melhor Muçulmano",
+      "arabe": "أَىُّ الإِسْلاَمِ أَفْضَلُ قَالَ مَنْ سَلِمَ الْمُسْلِمُونَ مِنْ لِسَانِهِ وَيَدِهِ",
+      "traducaoPt": "Perguntaram: Qual é o melhor [aspecto] do Islão? Respondeu: Aquele de quem os muçulmanos estão a salvo, tanto da sua língua como da sua mão."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 12,
+      "tema": "Alimentar e Saudar",
+      "arabe": "تُطْعِمُ الطَّعَامَ، وَتَقْرَأُ السَّلاَمَ عَلَى مَنْ عَرَفْتَ وَمَنْ لَمْ تَعْرِفْ",
+      "traducaoPt": "Alimentares os necessitados e saudares tanto quem conheces como quem não conheces."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 17,
+      "tema": "O Sinal da Fé e da Hipocrisia",
+      "arabe": "آيَةُ الإِيمَانِ حُبُّ الأَنْصَارِ، وَآيَةُ النِّفَاقِ بُغْضُ الأَنْصَارِ",
+      "traducaoPt": "O sinal da fé é o amor pelos Ansar (os auxiliadores de Madina), e o sinal da hipocrisia é a aversão aos Ansar."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 24,
+      "tema": "O Pudor é Parte da Fé",
+      "arabe": "دَعْهُ فَإِنَّ الْحَيَاءَ مِنَ الإِيمَانِ",
+      "traducaoPt": "Deixa-o, pois o pudor é parte da fé."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 33,
+      "tema": "Os Sinais do Hipócrita",
+      "arabe": "آيَةُ الْمُنَافِقِ ثَلاَثٌ إِذَا حَدَّثَ كَذَبَ، وَإِذَا وَعَدَ أَخْلَفَ، وَإِذَا اؤْتُمِنَ خَانَ",
+      "traducaoPt": "Os sinais do hipócrita são três: quando fala, mente; quando promete, falta à promessa; e quando lhe é confiada uma responsabilidade, trai-a."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 35,
+      "tema": "A Recompensa da Noite do Decreto",
+      "arabe": "مَنْ يَقُمْ لَيْلَةَ الْقَدْرِ إِيمَانًا وَاحْتِسَابًا غُفِرَ لَهُ مَا تَقَدَّمَ مِنْ ذَنْبِهِ",
+      "traducaoPt": "Quem se levantar em oração na Noite do Decreto (Lailat al-Qadr) com fé e em busca da recompensa de Allah, ser-lhe-ão perdoados os pecados anteriores."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 37,
+      "tema": "A Recompensa das Orações Noturnas do Ramadão",
+      "arabe": "مَنْ قَامَ رَمَضَانَ إِيمَانًا وَاحْتِسَابًا غُفِرَ لَهُ مَا تَقَدَّمَ مِنْ ذَنْبِهِ",
+      "traducaoPt": "Quem se levantar em oração noturna durante o Ramadão com fé e em busca da recompensa de Allah, ser-lhe-ão perdoados os pecados anteriores."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 38,
+      "tema": "A Recompensa do Jejum do Ramadão",
+      "arabe": "مَنْ صَامَ رَمَضَانَ إِيمَانًا وَاحْتِسَابًا غُفِرَ لَهُ مَا تَقَدَّمَ مِنْ ذَنْبِهِ",
+      "traducaoPt": "Quem jejuar o Ramadão com fé e em busca da recompensa de Allah, ser-lhe-ão perdoados os pecados anteriores."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 48,
+      "tema": "O Respeito entre Muçulmanos",
+      "arabe": "سِبَابُ الْمُسْلِمِ فُسُوقٌ، وَقِتَالُهُ كُفْرٌ",
+      "traducaoPt": "Insultar um muçulmano é transgressão, e lutar contra ele é descrença."
+    },
+    {
+      "colecao": "bukhari",
+      "secao": 2,
+      "numero": 55,
+      "tema": "Sustentar a Família é Caridade",
+      "arabe": "إِذَا أَنْفَقَ الرَّجُلُ عَلَى أَهْلِهِ يَحْتَسِبُهَا فَهُوَ لَهُ صَدَقَةٌ",
+      "traducaoPt": "Quando um homem sustenta a sua família, esperando por isso a recompensa de Allah, isso é para ele uma caridade (sadaqah)."
+    }
+  ]
+}

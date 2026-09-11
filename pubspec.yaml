@@ -19,6 +19,7 @@ dependencies:
   firebase_database: ^11.0.0
   firebase_messaging: ^15.0.0
   firebase_auth: ^5.1.0
+  google_sign_in: ^6.2.1
 
   # Notifications
   flutter_local_notifications: ^20.1.0
@@ -71,7 +72,15 @@ flutter_icons:
 
 flutter:
   uses-material-design: true
-  
+
   assets:
     - assets/icon.png
+    - assets/quran/indopak_pages.json
+    - assets/quran/duas_pt.json
+    - assets/quran/hadiths_conhecidos_pt.json
+
+  fonts:
+    - family: IndopakNastaleeq
+      fonts:
+        - asset: assets/fonts/IndopakNastaleeq.ttf
 

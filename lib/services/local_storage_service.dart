@@ -87,4 +87,45 @@ class LocalStorageService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('alarme_azan', value);
   }
+
+  /// Por padrão (false) o alarme de Azan só mostra a notificação com o
+  /// som normal do telemóvel. Quando activo, toca o som do Azan.
+  static Future<bool> tocarSomAzanAtivo() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('tocar_som_azan') ?? false;
+  }
+
+  static Future<void> setTocarSomAzan(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('tocar_som_azan', value);
+  }
+
+  static Future<List<Map<String, dynamic>>> carregarMarcadoresQuran() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString('quran_marcadores');
+    if (jsonString == null) return [];
+    return List<Map<String, dynamic>>.from(jsonDecode(jsonString));
+  }
+
+  static Future<void> salvarMarcadoresQuran(
+      List<Map<String, dynamic>> marcadores) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('quran_marcadores', jsonEncode(marcadores));
+  }
+
+  static Future<void> salvarUltimaLeituraQuran(int surah, int ayah) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'quran_ultima_leitura',
+      jsonEncode({"surah": surah, "ayah": ayah}),
+    );
+  }
+
+  static Future<Map<String, dynamic>?> carregarUltimaLeituraQuran() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString('quran_ultima_leitura');
+    if (jsonString == null) return null;
+    return Map<String, dynamic>.from(jsonDecode(jsonString));
+  }
+
 }

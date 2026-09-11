@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class MesquitaRegistoException implements Exception {
   final String mensagem;
@@ -12,12 +14,11 @@ class MesquitaRegistoException implements Exception {
 
 /// Regista, lista e aprova/rejeita pedidos de mesquitas.
 ///
-/// O "username" escolhido pelo requerente não é um email real — serve
-/// apenas para o Firebase Auth (que exige email+password), por isso é
-/// mapeado para "username@mosquenow.app" só para efeitos de autenticação.
-/// A senha nunca é gravada na Realtime Database — só o UID resultante.
+/// A identidade do requerente vem da conta Google usada para entrar
+/// (ver [entrarComGoogle]) — o UID resultante do Firebase Auth é também
+/// o futuro ID da mesquita.
 class MesquitaRegistoService {
-  static const _dominioAuth = "mosquenow.app";
+  static final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email']);
 
   static DatabaseReference get _db => FirebaseDatabase.instanceFor(
         app: Firebase.app(),
@@ -25,17 +26,38 @@ class MesquitaRegistoService {
             'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/',
       ).ref();
 
-  static String normalizarUsername(String username) =>
-      username.trim().toLowerCase();
+  /// Autentica com uma conta Google — usado tanto no registo de uma nova
+  /// mesquita como no login do admin de uma mesquita já aprovada.
+  /// Lança [MesquitaRegistoException] se o utilizador cancelar o diálogo.
+  static Future<User> entrarComGoogle() async {
+    try {
+      final googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        throw MesquitaRegistoException("Início de sessão com Google cancelado.");
+      }
 
-  /// Email sintético usado só para autenticar o username no Firebase Auth.
-  static String emailAuthParaUsername(String username) =>
-      "${normalizarUsername(username)}@$_dominioAuth";
+      final googleAuth = await googleUser.authentication;
+      final credencial = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
 
-  static Future<bool> usernameDisponivel(String username) async {
-    final snap =
-        await _db.child("usernames/${normalizarUsername(username)}").get();
-    return !snap.exists;
+      final userCredential =
+          await FirebaseAuth.instance.signInWithCredential(credencial);
+      return userCredential.user!;
+    } on MesquitaRegistoException {
+      rethrow;
+    } on FirebaseAuthException catch (e) {
+      throw MesquitaRegistoException("Erro ao entrar com Google (${e.code}).");
+    } catch (e) {
+      throw MesquitaRegistoException(
+          "Não foi possível entrar com Google. Verifique a sua ligação e tente novamente.");
+    }
+  }
+
+  static Future<void> sairGoogle() async {
+    await _googleSignIn.signOut();
+    await FirebaseAuth.instance.signOut();
   }
 
   /// Referência à mesquita administrada pelo utilizador com este UID.
@@ -57,12 +79,11 @@ class MesquitaRegistoService {
     return "inexistente";
   }
 
-  /// Cria a conta Firebase Auth do requerente, reserva o username
-  /// e grava o pedido em mesquitas_pendentes/{uid}.
-  /// Retorna o UID (também usado como futuro ID da mesquita).
+  /// Grava o pedido em mesquitas_pendentes/{uid}. Assume que o requerente
+  /// já está autenticado via [entrarComGoogle] — usa esse UID directamente
+  /// (também o futuro ID da mesquita) e guarda o token FCM do dispositivo
+  /// para poder notificar quando o super-admin aprovar.
   static Future<String> registar({
-    required String username,
-    required String password,
     required String nomeRequerente,
     required String telefoneRequerente,
     required String emailRequerente,
@@ -75,35 +96,20 @@ class MesquitaRegistoService {
     required String contactoMesquita,
     String? emailMesquita,
   }) async {
-    final chaveUsername = normalizarUsername(username);
-    final usernameRef = _db.child("usernames/$chaveUsername");
-
-    // Reserva atómica do username — evita corrida entre dois pedidos
-    // com o mesmo nome em simultâneo.
-    final transacao = await usernameRef.runTransaction((valorAtual) {
-      if (valorAtual != null) return Transaction.abort();
-      return Transaction.success(true);
-    });
-
-    if (!transacao.committed) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
       throw MesquitaRegistoException(
-          "Esse nome de utilizador já está em uso. Escolha outro.");
+          "Sessão Google expirada. Entre novamente com o Google.");
     }
 
-    UserCredential? credencial;
     try {
-      credencial = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: "$chaveUsername@$_dominioAuth",
-        password: password,
-      );
-
-      final uid = credencial.user!.uid;
-      await usernameRef.set(uid);
+      final uid = user.uid;
+      final fcmToken = await FirebaseMessaging.instance.getToken();
 
       await _db.child("mesquitas_pendentes/$uid").set({
         "status": "pendente",
         "criado_em": ServerValue.timestamp,
-        "username": chaveUsername,
+        "fcm_token_admin": fcmToken ?? "",
         "requerente": {
           "nome": nomeRequerente.trim(),
           "telefone": telefoneRequerente.trim(),
@@ -124,31 +130,9 @@ class MesquitaRegistoService {
       });
 
       return uid;
-    } on FirebaseAuthException catch (e) {
-      await usernameRef.remove();
-      throw MesquitaRegistoException(_traduzirErroAuth(e));
     } catch (e) {
-      await usernameRef.remove();
-      if (credencial?.user != null) {
-        try {
-          await credencial!.user!.delete();
-        } catch (_) {}
-      }
       throw MesquitaRegistoException(
           "Não foi possível concluir o registo. Verifique a sua ligação e tente novamente.");
-    }
-  }
-
-  static String _traduzirErroAuth(FirebaseAuthException e) {
-    switch (e.code) {
-      case 'email-already-in-use':
-        return "Esse nome de utilizador já está em uso. Escolha outro.";
-      case 'weak-password':
-        return "A senha é demasiado fraca. Use pelo menos 8 caracteres.";
-      case 'network-request-failed':
-        return "Sem ligação à internet. Tente novamente.";
-      default:
-        return "Erro ao criar a conta (${e.code}). Tente novamente.";
     }
   }
 
@@ -235,6 +219,7 @@ class MesquitaRegistoService {
       "iftar": "--:--",
       "orador_jummah": "",
       "nissab_valor": "0",
+      "fcm_token_admin": pedido['fcm_token_admin'] ?? "",
     });
 
     // "mover": a mesquita já vive em mesquitas/{uid}, o pedido sai de pendente.

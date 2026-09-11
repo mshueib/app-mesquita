@@ -4,6 +4,38 @@ const admin = require("firebase-admin");
 
 admin.initializeApp();
 
+// Nomes legíveis para cada campo que pode mudar no painel de admin.
+// Antes disto, o texto da notificação era construído a dividir o
+// nome do campo por "_" e assumir que a segunda parte era sempre
+// "azan" ou "namaz" — o que produzia notificações sem sentido para
+// campos como ano_islamico, nascer_sol ou nissab_valor (ex: "Ano
+// Iqamah → 1447").
+const CAMPO_LABELS = {
+    mes_islamico: "Mês Islâmico",
+    ano_islamico: "Ano Islâmico",
+    jejum: "Dia do Jejum",
+    sehri: "Sehri",
+    iftar: "Iftar",
+    fajr_azan: "Fajr (Azan)",
+    fajr_namaz: "Fajr (Iqamah)",
+    dhuhr_azan: "Dhuhr (Azan)",
+    dhuhr_namaz: "Dhuhr (Iqamah)",
+    asr_azan: "Asr (Azan)",
+    asr_namaz: "Asr (Iqamah)",
+    maghrib_azan: "Maghrib (Azan)",
+    maghrib_namaz: "Maghrib (Iqamah)",
+    isha_azan: "Isha (Azan)",
+    isha_namaz: "Isha (Iqamah)",
+    jummah_azan: "Jummah (Azan)",
+    jummah_namaz: "Jummah (Iqamah)",
+    suhoor: "Suhoor",
+    nascer_sol: "Nascer do Sol",
+    ishraq: "Ishraq",
+    zawwal: "Zawwal",
+    nissab_valor: "Valor do Nissab",
+    ultima_data_jejum: "Data do Jejum",
+};
+
 exports.enviarNotificacaoTrigger = onValueWritten(
     {
         ref: "/app/triggers/{mesquitaId}",
@@ -26,18 +58,8 @@ exports.enviarNotificacaoTrigger = onValueWritten(
 
             console.log("📡 Enviando notificação FCM");
 
-            const partes = campo.split("_");
-            const nomeOracao = partes.length >= 1
-                ? partes[0].charAt(0).toUpperCase()
-                + partes[0].slice(1)
-                : campo;
-            const tipoOracao = partes.length >= 2
-                ? (partes[1] === "azan"
-                    ? "Azan" : "Iqamah")
-                : "";
-            const bodyMsg = tipoOracao
-                ? `${nomeOracao} ${tipoOracao} → ${valor}`
-                : `${nomeOracao} → ${valor}`;
+            const nomeCampo = CAMPO_LABELS[campo] || campo;
+            const bodyMsg = `${nomeCampo} → ${valor}`;
 
             const payload = {
                 notification: {
@@ -153,10 +175,94 @@ exports.notificarNovoAviso = onValueWritten(
     }
 );
 
+exports.notificarAprovacaoMesquita = onValueWritten(
+    {
+        ref: "/mesquitas/{uid}",
+        region: "europe-west1",
+    },
+    async (event) => {
+        try {
+            const before = event.data.before;
+            const after = event.data.after;
+
+            // Só interessa a criação inicial feita pela aprovação do
+            // super-admin — não disparar em cada actualização posterior.
+            if (before.exists()) return null;
+            if (!after.exists()) return null;
+
+            const dados = after.val();
+            const token = dados.fcm_token_admin;
+            if (!token) return null;
+
+            console.log("📡 Enviando notificação de aprovação de mesquita");
+
+            await admin.messaging().send({
+                token,
+                notification: {
+                    title: "✅ Mesquita aprovada",
+                    body: `A "${dados.nome || "sua mesquita"}" foi aprovada! ` +
+                        "Entre para configurar os horários de oração.",
+                },
+                android: {
+                    priority: "high",
+                    notification: {
+                        channelId: "mesquita_channel",
+                        priority: "max",
+                        defaultSound: true,
+                        defaultVibrateTimings: true,
+                    },
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            sound: "default",
+                        },
+                    },
+                },
+            });
+
+            // Limpa o token para não voltar a disparar em futuras alterações.
+            await event.data.after.ref.update({fcm_token_admin: null});
+
+            return null;
+        } catch (error) {
+            console.error("❌ Erro ao notificar aprovação de mesquita:", error);
+            return null;
+        }
+    }
+);
+
+const MAPUTO_TZ = "Africa/Maputo";
+const UM_DIA_MS = 24 * 60 * 60 * 1000;
+
+// Data (yyyy-mm-dd) em hora de Maputo, independente do fuso do servidor.
+function dataMaputo(date) {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: MAPUTO_TZ,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(date);
+}
+
+// Hora/minuto actuais em Maputo, independente do fuso do servidor.
+function horaMaputo(date) {
+    const partes = new Intl.DateTimeFormat("en-GB", {
+        timeZone: MAPUTO_TZ,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    }).formatToParts(date);
+    return {
+        hour: Number(partes.find((p) => p.type === "hour").value),
+        minute: Number(partes.find((p) => p.type === "minute").value),
+    };
+}
+
 exports.incrementarDiaIslamico = onSchedule(
     {
         schedule: "every 1 hours",
-        timeZone: "Africa/Maputo",
+        timeZone: MAPUTO_TZ,
         region: "europe-west1",
     },
     async () => {
@@ -167,41 +273,67 @@ exports.incrementarDiaIslamico = onSchedule(
             if (!snapshot.exists()) return;
 
             const agora = new Date();
-            const hojeStr = agora.toISOString().split('T')[0];
+            const hojeStr = dataMaputo(agora);
+            const {hour: horaAtual, minute: minutoAtual} = horaMaputo(agora);
             const mesquitas = snapshot.val();
 
             for (const [id, dados] of Object.entries(mesquitas)) {
-                if (dados.ultima_data_jejum === hojeStr) {
-                    console.log(`✅ ${id} já actualizado hoje`);
-                    continue;
-                }
-
                 const maghribStr = dados.maghrib_azan;
                 if (!maghribStr || !maghribStr.includes(':')) continue;
 
                 const [maghribHour, maghribMin] = maghribStr
                     .split(':').map(Number);
 
-                const maghrib = new Date();
-                maghrib.setHours(maghribHour, maghribMin, 0, 0);
+                const jaPassouMaghribHoje =
+                    horaAtual > maghribHour ||
+                    (horaAtual === maghribHour && minutoAtual >= maghribMin);
 
-                if (agora < maghrib) {
-                    console.log(`⏳ ${id} — Maghrib ainda não chegou`);
+                // Dia que já deveria estar contabilizado: hoje, se o Maghrib
+                // já passou em Maputo; caso contrário, ainda é "ontem".
+                const diaEfetivo = jaPassouMaghribHoje ?
+                    hojeStr :
+                    dataMaputo(new Date(agora.getTime() - UM_DIA_MS));
+
+                const ultimaData = dados.ultima_data_jejum;
+
+                if (!ultimaData) {
+                    // Sem histórico — não inventar quantos dias passaram,
+                    // só regista a baseline para as próximas execuções.
+                    await admin.database().ref(`mesquitas/${id}`)
+                        .update({ultima_data_jejum: diaEfetivo});
                     continue;
                 }
 
-                let diaAtual = parseInt(dados.jejum) || 1;
-                let novoDia = diaAtual + 1;
-                if (novoDia > 30) novoDia = 1;
+                if (ultimaData === diaEfetivo) {
+                    console.log(`✅ ${id} já actualizado`);
+                    continue;
+                }
+
+                // Nº de dias realmente passados desde a última actualização.
+                // Isto corrige o contador mesmo que a função tenha ficado
+                // dias sem correr (falha, deploy, etc.) — em vez de avançar
+                // sempre +1, apanha a diferença toda de uma vez.
+                const diffDias = Math.round(
+                    (new Date(`${diaEfetivo}T00:00:00Z`) -
+                        new Date(`${ultimaData}T00:00:00Z`)) / UM_DIA_MS
+                );
+
+                if (diffDias <= 0) continue; // data inconsistente/futura
+
+                const diaAtual = parseInt(dados.jejum) || 0;
+                const novoDia = ((diaAtual - 1 + diffDias) % 30) + 1;
 
                 await admin.database()
                     .ref(`mesquitas/${id}`)
                     .update({
                         jejum: novoDia.toString(),
-                        ultima_data_jejum: hojeStr,
+                        ultima_data_jejum: diaEfetivo,
                     });
 
-                console.log(`✅ ${id} — Dia actualizado: ${novoDia}`);
+                console.log(
+                    `✅ ${id} — Dia actualizado: ${diaAtual} → ${novoDia} ` +
+                    `(+${diffDias}d)`
+                );
             }
         } catch (error) {
             console.error("❌ Erro:", error);

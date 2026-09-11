@@ -42,27 +42,21 @@ class _MesquitaRegistoPageState extends State<MesquitaRegistoPage> {
   final _contactoMesquitaCtrl = TextEditingController();
   final _emailMesquitaCtrl = TextEditingController();
 
-  // Credenciais
-  final _usernameCtrl = TextEditingController();
-  final _usernameFocus = FocusNode();
-  final _passwordCtrl = TextEditingController();
-  final _confirmarSenhaCtrl = TextEditingController();
-
-  bool? _usernameDisponivel;
-  bool _verificandoUsername = false;
+  // Autenticação Google
+  bool _googleConectado = false;
+  bool _entrandoGoogle = false;
+  String? _emailGoogleConectado;
 
   bool _enviando = false;
   bool _enviado = false;
 
   static final RegExp _telefoneRegex = RegExp(r'^[+]?[0-9\s-]{7,20}$');
   static final RegExp _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
-  static final RegExp _usernameRegex = RegExp(r'^[a-zA-Z0-9._-]{3,20}$');
 
   @override
   void initState() {
     super.initState();
     _nomeMesquitaCtrl = TextEditingController(text: widget.nomeInicial ?? "");
-    _usernameFocus.addListener(_onUsernameFocusChanged);
   }
 
   @override
@@ -77,37 +71,31 @@ class _MesquitaRegistoPageState extends State<MesquitaRegistoPage> {
     _nomeMesquitaCtrl.dispose();
     _contactoMesquitaCtrl.dispose();
     _emailMesquitaCtrl.dispose();
-    _usernameFocus.removeListener(_onUsernameFocusChanged);
-    _usernameFocus.dispose();
-    _usernameCtrl.dispose();
-    _passwordCtrl.dispose();
-    _confirmarSenhaCtrl.dispose();
     super.dispose();
   }
 
-  void _onUsernameFocusChanged() {
-    if (_usernameFocus.hasFocus) return;
-    _verificarUsername();
-  }
-
-  Future<void> _verificarUsername() async {
-    final username = _usernameCtrl.text.trim();
-    if (!_usernameRegex.hasMatch(username)) {
-      setState(() => _usernameDisponivel = null);
-      return;
-    }
-
-    setState(() => _verificandoUsername = true);
+  Future<void> _continuarComGoogle() async {
+    setState(() => _entrandoGoogle = true);
     try {
-      final disponivel = await MesquitaRegistoService.usernameDisponivel(username);
+      final user = await MesquitaRegistoService.entrarComGoogle();
       if (!mounted) return;
       setState(() {
-        _usernameDisponivel = disponivel;
-        _verificandoUsername = false;
+        _googleConectado = true;
+        _emailGoogleConectado = user.email;
+        _entrandoGoogle = false;
+        if (_nomeRequerenteCtrl.text.trim().isEmpty) {
+          _nomeRequerenteCtrl.text = user.displayName ?? "";
+        }
+        if (_emailRequerenteCtrl.text.trim().isEmpty) {
+          _emailRequerenteCtrl.text = user.email ?? "";
+        }
       });
-    } catch (_) {
+    } on MesquitaRegistoException catch (e) {
       if (!mounted) return;
-      setState(() => _verificandoUsername = false);
+      setState(() => _entrandoGoogle = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.mensagem), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -120,6 +108,13 @@ class _MesquitaRegistoPageState extends State<MesquitaRegistoPage> {
 
     if (!formValido || _erroPais != null) return;
 
+    if (!_googleConectado) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Entre com o Google para continuar")),
+      );
+      return;
+    }
+
     if (_cargo == "Outro" && _cargoOutroCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Indique o cargo na mesquita")),
@@ -129,31 +124,11 @@ class _MesquitaRegistoPageState extends State<MesquitaRegistoPage> {
 
     setState(() => _enviando = true);
 
-    final disponivel =
-        await MesquitaRegistoService.usernameDisponivel(_usernameCtrl.text.trim());
-
-    if (!disponivel) {
-      if (!mounted) return;
-      setState(() {
-        _enviando = false;
-        _usernameDisponivel = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Esse nome de utilizador já está em uso. Escolha outro."),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
     final cargoFinal =
         _cargo == "Outro" ? _cargoOutroCtrl.text.trim() : (_cargo ?? "");
 
     try {
       await MesquitaRegistoService.registar(
-        username: _usernameCtrl.text.trim(),
-        password: _passwordCtrl.text,
         nomeRequerente: _nomeRequerenteCtrl.text,
         telefoneRequerente: _telefoneRequerenteCtrl.text,
         emailRequerente: _emailRequerenteCtrl.text,
@@ -394,38 +369,76 @@ class _MesquitaRegistoPageState extends State<MesquitaRegistoPage> {
     );
   }
 
-  Widget _campoUsername() {
-    Widget? sufixo;
-    if (_verificandoUsername) {
-      sufixo = const Padding(
-        padding: EdgeInsets.all(12),
-        child: SizedBox(
-          width: 18,
-          height: 18,
-          child: CircularProgressIndicator(strokeWidth: 2),
+  Widget _cartaoGoogle() {
+    if (_googleConectado) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 20),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.green.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.green.withOpacity(0.3)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                "Sessão Google ligada: ${_emailGoogleConectado ?? ''}",
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
+              ),
+            ),
+          ],
         ),
       );
-    } else if (_usernameDisponivel == true) {
-      sufixo = const Icon(Icons.check_circle, color: Colors.green);
-    } else if (_usernameDisponivel == false) {
-      sufixo = const Icon(Icons.cancel, color: Colors.red);
     }
 
-    return _campo(
-      _usernameCtrl,
-      "Nome de utilizador",
-      Icons.person_outline,
-      focusNode: _usernameFocus,
-      suffixIcon: sufixo,
-      helper: "Um nome, sem espaços (ex: ahmed.imane)",
-      validador: (v) {
-        if (v == null || v.trim().isEmpty) return "Campo obrigatório";
-        if (!_usernameRegex.hasMatch(v.trim())) {
-          return "Sem espaços — só letras, números, ponto, hífen ou underscore";
-        }
-        if (_usernameDisponivel == false) return "Nome de utilizador em uso";
-        return null;
-      },
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF0B3D2E).withOpacity(0.15)),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.mosque, color: Color(0xFF0B3D2E), size: 36),
+          const SizedBox(height: 12),
+          const Text(
+            "Entre com a sua conta Google para começar o registo da mesquita.",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _entrandoGoogle ? null : _continuarComGoogle,
+              icon: _entrandoGoogle
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.g_mobiledata,
+                      size: 28, color: Color(0xFF0B3D2E)),
+              label: const Text("Continuar com Google"),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF0B3D2E),
+                side: const BorderSide(color: Color(0xFF0B3D2E)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -465,125 +478,105 @@ class _MesquitaRegistoPageState extends State<MesquitaRegistoPage> {
                 ],
               ),
             ),
-            _tituloSeccao("Dados do Requerente"),
-            _campo(_nomeRequerenteCtrl, "Nome completo", Icons.person_outline),
-            _campo(
-              _telefoneRequerenteCtrl,
-              "Contacto telefónico",
-              Icons.phone_outlined,
-              tipo: TextInputType.phone,
-              validador: (v) {
-                if (v == null || v.trim().isEmpty) return "Campo obrigatório";
-                if (!_telefoneRegex.hasMatch(v.trim())) {
-                  return "Número de telefone inválido";
-                }
-                return null;
-              },
-            ),
-            _campo(
-              _emailRequerenteCtrl,
-              "Email (opcional)",
-              Icons.email_outlined,
-              tipo: TextInputType.emailAddress,
-              validador: (v) {
-                if (v == null || v.trim().isEmpty) return null;
-                if (!_emailRegex.hasMatch(v.trim())) return "Email inválido";
-                return null;
-              },
-            ),
-            _campoCargo(),
-            _tituloSeccao("Localização"),
-            _campoPais(),
-            _campo(_cidadeCtrl, "Cidade", Icons.location_city),
-            _campo(_bairroCtrl, "Localidade/Bairro", Icons.place_outlined),
-            _campo(
-              _enderecoCtrl,
-              "Endereço completo (opcional)",
-              Icons.map_outlined,
-              validador: (_) => null,
-            ),
-            _tituloSeccao("Dados da Mesquita"),
-            _campo(_nomeMesquitaCtrl, "Nome da mesquita", Icons.mosque),
-            _campo(
-              _contactoMesquitaCtrl,
-              "Contacto da mesquita (telefone/WhatsApp)",
-              Icons.chat_outlined,
-              tipo: TextInputType.phone,
-              validador: (v) {
-                if (v == null || v.trim().isEmpty) return "Campo obrigatório";
-                if (!_telefoneRegex.hasMatch(v.trim())) {
-                  return "Número de telefone inválido";
-                }
-                return null;
-              },
-            ),
-            _campo(
-              _emailMesquitaCtrl,
-              "Email da mesquita (opcional)",
-              Icons.email_outlined,
-              tipo: TextInputType.emailAddress,
-              validador: (v) {
-                if (v == null || v.trim().isEmpty) return null;
-                if (!_emailRegex.hasMatch(v.trim())) return "Email inválido";
-                return null;
-              },
-            ),
-            _tituloSeccao("Credenciais de Acesso"),
-            _campoUsername(),
-            _campo(
-              _passwordCtrl,
-              "Senha",
-              Icons.lock_outline,
-              obscure: true,
-              validador: (v) {
-                if (v == null || v.isEmpty) return "Campo obrigatório";
-                if (v.length < 8) return "Mínimo 8 caracteres";
-                return null;
-              },
-            ),
-            _campo(
-              _confirmarSenhaCtrl,
-              "Confirmar senha",
-              Icons.lock_outline,
-              obscure: true,
-              validador: (v) {
-                if (v == null || v.isEmpty) return "Campo obrigatório";
-                if (v != _passwordCtrl.text) return "As senhas não coincidem";
-                return null;
-              },
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _enviando ? null : _submeter,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0B3D2E),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: _enviando
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : const Text(
-                        "Registar Mesquita",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-              ),
-            ),
             const SizedBox(height: 20),
+            _cartaoGoogle(),
+            if (_googleConectado) ...[
+              _tituloSeccao("Dados do Requerente"),
+              _campo(_nomeRequerenteCtrl, "Nome completo", Icons.person_outline),
+              _campo(
+                _telefoneRequerenteCtrl,
+                "Contacto telefónico",
+                Icons.phone_outlined,
+                tipo: TextInputType.phone,
+                validador: (v) {
+                  if (v == null || v.trim().isEmpty) return "Campo obrigatório";
+                  if (!_telefoneRegex.hasMatch(v.trim())) {
+                    return "Número de telefone inválido";
+                  }
+                  return null;
+                },
+              ),
+              _campo(
+                _emailRequerenteCtrl,
+                "Email (opcional)",
+                Icons.email_outlined,
+                tipo: TextInputType.emailAddress,
+                validador: (v) {
+                  if (v == null || v.trim().isEmpty) return null;
+                  if (!_emailRegex.hasMatch(v.trim())) return "Email inválido";
+                  return null;
+                },
+              ),
+              _campoCargo(),
+              _tituloSeccao("Localização"),
+              _campoPais(),
+              _campo(_cidadeCtrl, "Cidade", Icons.location_city),
+              _campo(_bairroCtrl, "Localidade/Bairro", Icons.place_outlined),
+              _campo(
+                _enderecoCtrl,
+                "Endereço completo (opcional)",
+                Icons.map_outlined,
+                validador: (_) => null,
+              ),
+              _tituloSeccao("Dados da Mesquita"),
+              _campo(_nomeMesquitaCtrl, "Nome da mesquita", Icons.mosque),
+              _campo(
+                _contactoMesquitaCtrl,
+                "Contacto da mesquita (telefone/WhatsApp)",
+                Icons.chat_outlined,
+                tipo: TextInputType.phone,
+                validador: (v) {
+                  if (v == null || v.trim().isEmpty) return "Campo obrigatório";
+                  if (!_telefoneRegex.hasMatch(v.trim())) {
+                    return "Número de telefone inválido";
+                  }
+                  return null;
+                },
+              ),
+              _campo(
+                _emailMesquitaCtrl,
+                "Email da mesquita (opcional)",
+                Icons.email_outlined,
+                tipo: TextInputType.emailAddress,
+                validador: (v) {
+                  if (v == null || v.trim().isEmpty) return null;
+                  if (!_emailRegex.hasMatch(v.trim())) return "Email inválido";
+                  return null;
+                },
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _enviando ? null : _submeter,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0B3D2E),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: _enviando
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          "Registar Mesquita",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
           ],
         ),
       ),

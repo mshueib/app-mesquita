@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Contador de Tasbih (dhikr), extraído do main.dart para poder ser
-/// aberto como página própria a partir do menu "Mais".
+/// Contador de Tasbih (dhikr) — vive como página do PageView principal,
+/// por isso não tem AppBar própria (usa a barra do topo da Início).
 class TasbihPage extends StatefulWidget {
   const TasbihPage({super.key});
 
@@ -17,11 +17,6 @@ class _TasbihPageState extends State<TasbihPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0B3D2E),
-        title: const Text("Tasbih", style: TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () async {

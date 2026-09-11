@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
 import '../services/mesquita_registo_service.dart';
 
@@ -38,19 +37,14 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
   int _tentativas = 0;
   bool _bloqueado = false;
 
-  // Login do admin principal (username + senha criados no registo)
+  // Login do admin principal (mesma conta Google usada no registo)
   bool _usarLoginMesquita = false;
-  final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _senhaController = TextEditingController();
-  bool _mostrarSenha = false;
   bool _loadingMesquita = false;
   String _erroMesquita = "";
 
   @override
   void dispose() {
     _pinController.dispose();
-    _usernameController.dispose();
-    _senhaController.dispose();
     super.dispose();
   }
 
@@ -97,30 +91,18 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
   }
 
   Future<void> _loginMesquita() async {
-    final username = _usernameController.text.trim();
-    final senha = _senhaController.text;
-
-    if (username.isEmpty || senha.isEmpty) {
-      setState(() => _erroMesquita = "Preencha o utilizador e a senha");
-      return;
-    }
-
     setState(() {
       _loadingMesquita = true;
       _erroMesquita = "";
     });
 
     try {
-      final credencial = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: MesquitaRegistoService.emailAuthParaUsername(username),
-        password: senha,
-      );
-
-      final uid = credencial.user!.uid;
+      final user = await MesquitaRegistoService.entrarComGoogle();
+      final uid = user.uid;
       final status = await MesquitaRegistoService.statusParaUid(uid);
 
       if (status != "aprovado") {
-        await FirebaseAuth.instance.signOut();
+        await MesquitaRegistoService.sairGoogle();
         if (!mounted) return;
         setState(() {
           _loadingMesquita = false;
@@ -128,7 +110,7 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
             "pendente" =>
               "O seu registo ainda está a aguardar aprovação do administrador.",
             "rejeitado" => "O pedido de registo desta mesquita foi rejeitado.",
-            _ => "Conta não associada a nenhuma mesquita.",
+            _ => "Conta Google não associada a nenhuma mesquita.",
           };
         });
         return;
@@ -137,16 +119,11 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
       if (!mounted) return;
       setState(() => _loadingMesquita = false);
       await widget.onSuccessMesquita!(uid);
-    } on FirebaseAuthException catch (e) {
+    } on MesquitaRegistoException catch (e) {
       if (!mounted) return;
       setState(() {
         _loadingMesquita = false;
-        _erroMesquita = switch (e.code) {
-          'user-not-found' || 'invalid-credential' || 'wrong-password' =>
-            "Utilizador ou senha incorrectos.",
-          'network-request-failed' => "Sem ligação à internet.",
-          _ => "Erro ao entrar (${e.code}).",
-        };
+        _erroMesquita = e.mensagem;
       });
     } catch (_) {
       if (!mounted) return;
@@ -247,42 +224,31 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
 
   List<Widget> _camposMesquita() {
     return [
-      TextField(
-        controller: _usernameController,
-        decoration: const InputDecoration(
-          labelText: "Nome de utilizador",
-          prefixIcon: Icon(Icons.person_outline),
-          border: OutlineInputBorder(),
-        ),
-      ),
-      const SizedBox(height: 14),
-      TextField(
-        controller: _senhaController,
-        obscureText: !_mostrarSenha,
-        decoration: InputDecoration(
-          labelText: "Senha",
-          prefixIcon: const Icon(Icons.lock_outline),
-          border: const OutlineInputBorder(),
-          suffixIcon: IconButton(
-            icon: Icon(_mostrarSenha ? Icons.visibility : Icons.visibility_off),
-            onPressed: () => setState(() => _mostrarSenha = !_mostrarSenha),
-          ),
-        ),
+      const Text(
+        "Entre com a conta Google usada no registo da mesquita.",
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 13, color: Colors.grey),
       ),
       const SizedBox(height: 20),
       SizedBox(
         width: double.infinity,
-        child: ElevatedButton(
+        child: OutlinedButton.icon(
           onPressed: _loadingMesquita ? null : _loginMesquita,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF0B3D2E),
+          icon: _loadingMesquita
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.g_mobiledata,
+                  size: 28, color: Color(0xFF0B3D2E)),
+          label: const Text("Entrar com Google"),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF0B3D2E),
+            side: const BorderSide(color: Color(0xFF0B3D2E)),
             padding: const EdgeInsets.symmetric(vertical: 14),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
-          child: _loadingMesquita
-              ? const CircularProgressIndicator(color: Colors.white)
-              : const Text("Entrar",
-                  style: TextStyle(color: Colors.white, fontSize: 16)),
         ),
       ),
       const SizedBox(height: 12),

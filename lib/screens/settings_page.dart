@@ -13,6 +13,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _notifHorarios = true;
   bool _notifAvisos = true;
   bool _alarmeAzan = true;
+  bool _tocarSomAzan = false;
 
   @override
   void initState() {
@@ -24,10 +25,12 @@ class _SettingsPageState extends State<SettingsPage> {
     final h = await LocalStorageService.notificacoesHorariosAtivas();
     final a = await LocalStorageService.notificacoesAvisosAtivos();
     final z = await LocalStorageService.alarmeAzanAtivo();
+    final s = await LocalStorageService.tocarSomAzanAtivo();
     setState(() {
       _notifHorarios = h;
       _notifAvisos = a;
       _alarmeAzan = z;
+      _tocarSomAzan = s;
     });
   }
 
@@ -47,6 +50,14 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!value) {
       await NotificationService.cancelarAzan();
     }
+  }
+
+  void _toggleSomAzan(bool value) async {
+    setState(() => _tocarSomAzan = value);
+    await LocalStorageService.setTocarSomAzan(value);
+    // O som de um canal Android não pode mudar depois de agendado —
+    // cancela para que o próximo agendamento use o canal certo.
+    await NotificationService.cancelarAzan();
   }
 
   Widget _tile(String titulo, String subtitulo, IconData icone, bool value,
@@ -116,6 +127,12 @@ class _SettingsPageState extends State<SettingsPage> {
               Icons.campaign_outlined, _notifAvisos, _toggleAvisos),
           _tile("Alarme de Azan/Iqamah", "Alarme diário nas horas de oração",
               Icons.notifications_active_outlined, _alarmeAzan, _toggleAzan),
+          _tile(
+              "Tocar o som do Azan",
+              "Por padrão só aparece a notificação; active para tocar o Azan",
+              Icons.volume_up_outlined,
+              _tocarSomAzan,
+              _toggleSomAzan),
         ],
       ),
     );

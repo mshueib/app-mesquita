@@ -36,9 +36,23 @@ class NotificationService {
       AndroidNotificationChannel(
     'azan_channel',
     'Alarme de Azan',
-    description: 'Alarme diário para os horários de oração',
+    description: 'Alarme diário para os horários de oração (só notificação)',
     importance: Importance.max,
     playSound: true,
+    enableVibration: true,
+  );
+
+  // Canal separado porque o som de um canal Android não pode ser
+  // alterado depois de criado — precisa de um canal próprio para tocar
+  // o áudio do Azan em vez do som de notificação padrão.
+  static const AndroidNotificationChannel azanChannelComSom =
+      AndroidNotificationChannel(
+    'azan_channel_som',
+    'Alarme de Azan (com som do Azan)',
+    description: 'Alarme diário para os horários de oração, a tocar o Azan',
+    importance: Importance.max,
+    playSound: true,
+    sound: RawResourceAndroidNotificationSound('azan'),
     enableVibration: true,
   );
 
@@ -59,6 +73,7 @@ class NotificationService {
 
     await androidImplementation?.createNotificationChannel(channel);
     await androidImplementation?.createNotificationChannel(azanChannel);
+    await androidImplementation?.createNotificationChannel(azanChannelComSom);
   }
 
   static Future<void> showNotification({
@@ -88,6 +103,7 @@ class NotificationService {
     required int hour,
     required int minute,
     required int id,
+    bool tocarSom = false,
   }) async {
     final now = tz.TZDateTime.now(tz.local);
 
@@ -104,19 +120,24 @@ class NotificationService {
       scheduledDate = scheduledDate.add(const Duration(days: 1));
     }
 
-    const androidDetails = AndroidNotificationDetails(
-      'azan_channel',
-      'Alarme de Azan',
-      channelDescription: 'Alarme diário para os horários de oração',
+    final androidDetails = AndroidNotificationDetails(
+      tocarSom ? azanChannelComSom.id : azanChannel.id,
+      tocarSom ? azanChannelComSom.name : azanChannel.name,
+      channelDescription: tocarSom
+          ? azanChannelComSom.description
+          : azanChannel.description,
       importance: Importance.max,
       priority: Priority.max,
       playSound: true,
+      sound: tocarSom
+          ? const RawResourceAndroidNotificationSound('azan')
+          : null,
       enableVibration: true,
       category: AndroidNotificationCategory.alarm,
       visibility: NotificationVisibility.public,
     );
 
-    const notificationDetails = NotificationDetails(
+    final notificationDetails = NotificationDetails(
       android: androidDetails,
     );
 

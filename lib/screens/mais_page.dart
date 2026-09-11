@@ -1,17 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../utils/nav_helper.dart';
-import 'tasbih_page.dart';
-import 'zakat_page.dart';
-import 'qibla_page.dart';
 import 'admin_login_page.dart';
 import 'admin_panel_page.dart';
 import 'developer_page.dart';
 import 'pedidos_page.dart';
 import '../services/mesquita_registo_service.dart';
 
-/// Menu "Mais" — reúne Tasbih, Zakat, Qibla, Admin e Sobre numa
-/// única aba, para libertar espaço na barra de navegação inferior.
+/// Menu "Mais" — reúne Admin, Super Admin e Sobre numa única aba.
+/// Tasbih, Zakat e Qibla vivem como páginas próprias no PageView
+/// principal (ver [_secoes] em main.dart), acessíveis por swipe ou
+/// pelo botão "Menu Principal" da Início.
 class MaisPage extends StatelessWidget {
   final DatabaseReference dbRef;
   final Map<String, dynamic> dados;
@@ -25,34 +24,6 @@ class MaisPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final itens = <_ItemMenu>[
-      _ItemMenu(
-        icone: Icons.touch_app,
-        titulo: "Tasbih",
-        subtitulo: "Contador de dhikr",
-        onTap: (context) => NavHelper.push(context, const TasbihPage()),
-      ),
-      _ItemMenu(
-        icone: Icons.calculate,
-        titulo: "Zakat",
-        subtitulo: "Calculadora de Zakat",
-        onTap: (context) => NavHelper.push(
-          context,
-          ZakatPage(
-            nissabAdmin:
-                double.tryParse(dados['nissab_valor']?.toString() ?? "0") ??
-                    0,
-          ),
-        ),
-      ),
-      _ItemMenu(
-        icone: Icons.explore,
-        titulo: "Qibla",
-        subtitulo: "Direcção da Qibla",
-        onTap: (context) => NavHelper.push(
-          context,
-          const _PageComAppBar(titulo: "Qibla", child: QiblaPage()),
-        ),
-      ),
       _ItemMenu(
         icone: Icons.lock,
         titulo: "Admin",

@@ -16,6 +16,10 @@ import 'screens/audio_page.dart';
 import 'screens/mesquitas_page.dart';
 import 'screens/settings_page.dart';
 import 'screens/mais_page.dart';
+import 'screens/tasbih_page.dart';
+import 'screens/zakat_page.dart';
+import 'screens/qibla_page.dart';
+import 'screens/islamico_page.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -29,9 +33,11 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // se for aviso, só mostra — não reagenda
   final tipoMsg = message.data['tipo'] ?? "";
   if (tipoMsg == "aviso") {
+    final corpoAviso = message.data['body'];
+    if (corpoAviso == null || corpoAviso.trim().isEmpty) return;
     await NotificationService.showNotification(
       title: message.data['title'] ?? "📢 Novo Aviso",
-      body: message.data['body'] ?? "",
+      body: corpoAviso,
     );
     return;
   }
@@ -47,6 +53,8 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final dadosAtualizados = Map<String, dynamic>.from(snapshot.value as Map);
 
   await NotificationService.cancelarAzan();
+
+  final tocarSom = await LocalStorageService.tocarSomAzanAtivo();
 
   for (var entry in {
     "Fajr": dadosAtualizados['fajr_azan'],
@@ -67,6 +75,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       hour: int.parse(partes[0]),
       minute: int.parse(partes[1]),
       id: NotificationService.azanIds[nome]!,
+      tocarSom: tocarSom,
     );
   }
   final title = message.data['title'] ?? "🕌 Horário actualizado";
@@ -126,6 +135,13 @@ class MesquitaApp extends StatelessWidget {
       theme: ThemeData(
         scaffoldBackgroundColor: const Color(0xFFF4F1EA),
         textTheme: GoogleFonts.poppinsTextTheme(),
+      ),
+      // Evita que o conteúdo fique escondido atrás dos botões de navegação
+      // do sistema (ex: barra de 3 botões do Samsung) em todos os ecrãs.
+      builder: (context, child) => SafeArea(
+        top: false,
+        bottom: true,
+        child: child ?? const SizedBox(),
       ),
       home: const HomePage(),
     );
@@ -349,9 +365,13 @@ class _HomePageState extends State<HomePage> {
 
       if (tipoMsg == "aviso") {
         // FCM de aviso — só mostra notificação
+        final corpoAviso = message.notification?.body ?? message.data['body'];
+        if (corpoAviso == null || corpoAviso.trim().isEmpty) return;
         await NotificationService.showNotification(
-          title: message.notification?.title ?? "📢 Novo Aviso",
-          body: message.notification?.body ?? "",
+          title: message.notification?.title ??
+              message.data['title'] ??
+              "📢 Novo Aviso",
+          body: corpoAviso,
         );
         return;
       }
@@ -408,6 +428,7 @@ class _HomePageState extends State<HomePage> {
     _dbSub?.cancel();
     _connectivitySubscription.cancel();
     _pageController.dispose();
+    _rodapeScrollController.dispose();
     super.dispose();
   }
 
@@ -514,9 +535,10 @@ class _HomePageState extends State<HomePage> {
   }
 
 // Compara "1.0.1" com "1.0.2" → retorna negativo se a < b
+  // Aceita sufixo "+build" (ex: "1.0.2+4"), que é ignorado na comparação.
   int _compararVersoes(String a, String b) {
-    final pa = a.split('.').map(int.parse).toList();
-    final pb = b.split('.').map(int.parse).toList();
+    final pa = a.split('+').first.split('.').map(int.parse).toList();
+    final pb = b.split('+').first.split('.').map(int.parse).toList();
     for (int i = 0; i < 3; i++) {
       final diff = (pa.elementAtOrNull(i) ?? 0) - (pb.elementAtOrNull(i) ?? 0);
       if (diff != 0) return diff;
@@ -528,7 +550,18 @@ class _HomePageState extends State<HomePage> {
     if (dadosMap.isEmpty) return;
     final ativoAzan = await LocalStorageService.alarmeAzanAtivo();
     if (!ativoAzan) return;
+
+    // Alarme de azan só toca para mesquitas marcadas como favoritas —
+    // mesmo comportamento que os avisos/alterações de horário já têm
+    // via subscrição a tópico em _toggleFavorito.
+    if (_mesquitaSelecionada == null ||
+        !_favoritos.contains(_mesquitaSelecionada)) {
+      await NotificationService.cancelarAzan();
+      return;
+    }
     print("🔥 A AGENDAR AZAN...");
+
+    final tocarSom = await LocalStorageService.tocarSomAzanAtivo();
 
     final horarios = {
       "Fajr": dadosMap['fajr_azan'],
@@ -564,6 +597,7 @@ class _HomePageState extends State<HomePage> {
         hour: hour,
         minute: minute,
         id: NotificationService.azanIds[nome]!,
+        tocarSom: tocarSom,
       );
     }
   }
@@ -575,6 +609,15 @@ class _HomePageState extends State<HomePage> {
     // VERIFICAÇÃO
     final ativoAzan = await LocalStorageService.alarmeAzanAtivo();
     if (!ativoAzan) return;
+
+    // Alarme de azan só toca para mesquitas marcadas como favoritas.
+    if (_mesquitaSelecionada == null ||
+        !_favoritos.contains(_mesquitaSelecionada)) {
+      await NotificationService.cancelarAzan();
+      return;
+    }
+
+    final tocarSom = await LocalStorageService.tocarSomAzanAtivo();
 
     final horarios = {
       "Fajr": dadosMap['fajr_azan'],
@@ -605,6 +648,7 @@ class _HomePageState extends State<HomePage> {
         hour: hour,
         minute: minute,
         id: NotificationService.azanIds[nome]!,
+        tocarSom: tocarSom,
       );
     }
   }
@@ -731,12 +775,118 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  static const List<_SecaoMenu> _secoes = [
+    _SecaoMenu("Início", Icons.home),
+    _SecaoMenu("Avisos", Icons.info),
+    _SecaoMenu("Áudio", Icons.radio),
+    _SecaoMenu("Tasbih", Icons.touch_app),
+    _SecaoMenu("Zakat", Icons.calculate),
+    _SecaoMenu("Qibla", Icons.explore),
+    _SecaoMenu("Islâmico", Icons.menu_book),
+    _SecaoMenu("Mais", Icons.apps),
+  ];
+
+  final List<GlobalKey> _chavesRodape =
+      List.generate(_secoes.length, (_) => GlobalKey());
+  final ScrollController _rodapeScrollController = ScrollController();
+
+  void _irParaSecao(int indice) {
+    _pageController.animateToPage(
+      indice,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  void _centralizarItemRodape(int indice) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _chavesRodape[indice].currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        alignment: 0.5,
+      );
+    });
+  }
+
+  Widget _rodapeSecoes() {
+    return Container(
+      color: Colors.white,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 60,
+          child: ListView.builder(
+            controller: _rodapeScrollController,
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            itemCount: _secoes.length,
+            itemBuilder: (context, i) {
+              final selecionado = i == _indiceAtual;
+              return Padding(
+                key: _chavesRodape[i],
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                child: GestureDetector(
+                  onTap: () => _irParaSecao(i),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeInOut,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: selecionado
+                          ? const Color(0xFF0B3D2E)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _secoes[i].icone,
+                          color: selecionado
+                              ? Colors.white
+                              : const Color(0xFF0B3D2E),
+                          size: 22,
+                        ),
+                        if (selecionado) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            _secoes[i].titulo,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<Widget> paginas = [
       _paginaInicio(),
       _paginaAvisos(),
       const AudioPage(),
+      const TasbihPage(),
+      ZakatPage(
+        nissabAdmin:
+            double.tryParse(dados['nissab_valor']?.toString() ?? "0") ?? 0,
+      ),
+      const QiblaPage(),
+      const IslamicoPage(),
       MaisPage(dbRef: _dbRef, dados: dados),
     ];
 
@@ -744,6 +894,17 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0B3D2E),
         centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.home, color: Colors.white),
+          tooltip: "Início",
+          onPressed: () {
+            _pageController.animateToPage(
+              0,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            );
+          },
+        ),
         title: const Text(
           "Masjid Central: Quelimane",
           style: TextStyle(
@@ -827,6 +988,7 @@ class _HomePageState extends State<HomePage> {
               setState(() {
                 _indiceAtual = index;
               });
+              _centralizarItemRodape(index);
             },
             children: paginas,
           ),
@@ -859,24 +1021,7 @@ class _HomePageState extends State<HomePage> {
             ),
         ],
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _indiceAtual,
-        onTap: (i) {
-          _pageController.animateToPage(
-            i,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-          );
-        },
-        selectedItemColor: const Color(0xFF0B3D2E),
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: "Início"),
-          BottomNavigationBarItem(icon: Icon(Icons.info), label: "Avisos"),
-          BottomNavigationBarItem(icon: Icon(Icons.radio), label: "Áudio"),
-          BottomNavigationBarItem(icon: Icon(Icons.apps), label: "Mais"),
-        ],
-      ),
+      bottomNavigationBar: _rodapeSecoes(),
     );
   }
 
@@ -1176,17 +1321,32 @@ class _HomePageState extends State<HomePage> {
         color: const Color(0xFFFFF8E1),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFFD4AF37)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFD4AF37).withValues(alpha: 0.15),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            "${dados['mes_islamico'] ?? 'RAMADHAN'} ${dados['ano_islamico'] ?? '1447'}",
-            style: const TextStyle(
-              fontSize: 20,
-              color: Color(0xFFB8860B),
-              fontWeight: FontWeight.bold,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.nights_stay,
+                  size: 18, color: Color(0xFFB8860B)),
+              const SizedBox(width: 8),
+              Text(
+                "${dados['mes_islamico'] ?? 'RAMADHAN'} ${dados['ano_islamico'] ?? '1447'}",
+                style: const TextStyle(
+                  fontSize: 20,
+                  color: Color(0xFFB8860B),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Row(
@@ -1226,6 +1386,13 @@ class _HomePageState extends State<HomePage> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(22),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.07),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
           child: Column(
             children: [
@@ -1482,7 +1649,6 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-
 }
 
 class CountdownCard extends StatefulWidget {
@@ -1689,4 +1855,11 @@ class _CountdownCardState extends State<CountdownCard>
       ),
     );
   }
+}
+
+class _SecaoMenu {
+  final String titulo;
+  final IconData icone;
+
+  const _SecaoMenu(this.titulo, this.icone);
 }

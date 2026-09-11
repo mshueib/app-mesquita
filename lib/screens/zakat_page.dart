@@ -25,18 +25,20 @@ class _ZakatPageState extends State<ZakatPage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F1EA),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0B3D2E),
-        title: const Text(
-          "Zakat",
-          style: TextStyle(color: Colors.white),
-        ),
-      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            const Text(
+              "Zakat",
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF0B3D2E),
+              ),
+            ),
+            const SizedBox(height: 16),
             // ========================
             // NISSAB EDITÁVEL
             // ========================
