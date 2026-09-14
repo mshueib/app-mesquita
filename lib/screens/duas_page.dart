@@ -80,7 +80,7 @@ class _DuasPageState extends State<DuasPage> {
                       horizontal: 16, vertical: 8),
                   leading: const CircleAvatar(
                     backgroundColor: Color(0xFF0B3D2E),
-                    child: Icon(Icons.self_improvement, color: Colors.white),
+                    child: Icon(Icons.volunteer_activism, color: Colors.white),
                   ),
                   title: Text(
                     categoria.nome,
@@ -203,7 +203,7 @@ class _DuaListaPageState extends State<DuaListaPage> {
                   if (dua.titulo.isNotEmpty)
                     Row(
                       children: [
-                        const Icon(Icons.self_improvement,
+                        const Icon(Icons.volunteer_activism,
                             size: 16, color: Color(0xFFB8860B)),
                         const SizedBox(width: 6),
                         Expanded(

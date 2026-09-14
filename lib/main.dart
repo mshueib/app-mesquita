@@ -965,9 +965,13 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               GestureDetector(
-                onTap: () {
-                  Navigator.push(context,
+                onTap: () async {
+                  await Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const SettingsPage()));
+                  // As preferências de Azan (activar/som) só cancelam os
+                  // alarmes agendados — sem isto, ficam cancelados até o
+                  // utilizador reiniciar a app.
+                  await _reagendarAzanSeNecessario();
                 },
                 child: const Padding(
                   padding: EdgeInsets.only(left: 4, right: 8),

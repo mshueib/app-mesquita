@@ -32,9 +32,14 @@ class NotificationService {
     importance: Importance.max,
   );
 
+  // ID novo de propósito: canais Android são imutáveis depois de
+  // criados no aparelho — se o telemóvel já tinha "azan_channel"
+  // registado com uma configuração antiga, o código nunca consegue
+  // corrigir esse canal, só criando um ID novo é que força o Android
+  // a aplicar as definições actuais (som, importância, etc.).
   static const AndroidNotificationChannel azanChannel =
       AndroidNotificationChannel(
-    'azan_channel',
+    'azan_channel_v2',
     'Alarme de Azan',
     description: 'Alarme diário para os horários de oração (só notificação)',
     importance: Importance.max,
@@ -47,7 +52,7 @@ class NotificationService {
   // o áudio do Azan em vez do som de notificação padrão.
   static const AndroidNotificationChannel azanChannelComSom =
       AndroidNotificationChannel(
-    'azan_channel_som',
+    'azan_channel_som_v2',
     'Alarme de Azan (com som do Azan)',
     description: 'Alarme diário para os horários de oração, a tocar o Azan',
     importance: Importance.max,
@@ -73,7 +78,14 @@ class NotificationService {
 
     await androidImplementation?.createNotificationChannel(channel);
     await androidImplementation?.createNotificationChannel(azanChannel);
-    await androidImplementation?.createNotificationChannel(azanChannelComSom);
+    // Isolado em try/catch: se o ficheiro de som do Azan (raw/azan.mp3)
+    // tiver algum problema, isto não pode impedir a criação dos canais
+    // anteriores nem travar o resto da inicialização das notificações.
+    try {
+      await androidImplementation?.createNotificationChannel(azanChannelComSom);
+    } catch (e) {
+      print("⚠️ Não foi possível criar o canal de som do Azan: $e");
+    }
   }
 
   static Future<void> showNotification({
