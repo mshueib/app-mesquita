@@ -1,8 +1,102 @@
 const { onValueWritten } = require("firebase-functions/v2/database");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
+const nodemailer = require("nodemailer");
 const admin = require("firebase-admin");
+const crypto = require("crypto");
 
 admin.initializeApp();
+
+// ---------------------------------------------------------------------
+// Login por PIN verificado no servidor.
+//
+// Antes, a app lia o PIN da base de dados (que era de leitura pública) e
+// comparava-o no telemóvel. Agora os PINs vivem em /privado (nenhum
+// cliente lhes acede) e esta função, se o PIN estiver certo, dá ao
+// utilizador (sessão anónima) um custom claim que as regras verificam:
+//   superAdmin: true           → gere tudo e aprova mesquitas
+//   mesquita: "<id>"           → gere só essa mesquita
+// ---------------------------------------------------------------------
+const JANELA_MS = 15 * 60 * 1000;
+const MAX_FALHAS_POR_UTILIZADOR = 5;
+// Sessões anónimas são baratas — um limite por PIN evita que alguém
+// contorne o limite acima criando uma sessão nova a cada tentativa.
+const MAX_FALHAS_POR_PIN = 30;
+
+function pinsIguais(a, b) {
+    const x = Buffer.from(String(a).trim());
+    const y = Buffer.from(String(b).trim());
+    return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+async function registarFalha(ref, agora) {
+    await ref.transaction((t) => {
+        if (!t || agora - (t.desde || 0) > JANELA_MS) {
+            return {n: 1, desde: agora};
+        }
+        return {n: (t.n || 0) + 1, desde: t.desde};
+    });
+}
+
+async function bloqueado(ref, agora, maximo) {
+    const t = (await ref.get()).val();
+    return !!t && agora - (t.desde || 0) <= JANELA_MS && (t.n || 0) >= maximo;
+}
+
+exports.loginComPin = onCall({region: "europe-west1"}, async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) {
+        throw new HttpsError("unauthenticated", "Sessão em falta.");
+    }
+
+    const {pin, tipo, mesquitaId} = request.data || {};
+    if (typeof pin !== "string" || !pin.trim() ||
+        !["admin", "superAdmin"].includes(tipo)) {
+        throw new HttpsError("invalid-argument", "Pedido inválido.");
+    }
+    if (tipo === "admin" &&
+        (typeof mesquitaId !== "string" ||
+            !/^[A-Za-z0-9_-]{1,128}$/.test(mesquitaId))) {
+        throw new HttpsError("invalid-argument", "Mesquita inválida.");
+    }
+
+    const db = admin.database();
+    const alvo = tipo === "superAdmin" ?
+        "super_admin" : `mesquita_${mesquitaId}`;
+    const refUtilizador = db.ref(`privado/tentativas/utilizador/${uid}`);
+    const refPin = db.ref(`privado/tentativas/pin/${alvo}`);
+    const agora = Date.now();
+
+    if (await bloqueado(refUtilizador, agora, MAX_FALHAS_POR_UTILIZADOR) ||
+        await bloqueado(refPin, agora, MAX_FALHAS_POR_PIN)) {
+        throw new HttpsError("resource-exhausted",
+            "Demasiadas tentativas. Tente novamente mais tarde.");
+    }
+
+    const caminho = tipo === "superAdmin" ?
+        "privado/pins/super_admin" : `privado/pins/mesquitas/${mesquitaId}`;
+    const correcto = (await db.ref(caminho).get()).val();
+
+    if (correcto === null || !pinsIguais(correcto, pin)) {
+        await registarFalha(refUtilizador, agora);
+        await registarFalha(refPin, agora);
+        return {ok: false};
+    }
+
+    await refUtilizador.remove();
+
+    const utilizador = await admin.auth().getUser(uid);
+    const claims = {...(utilizador.customClaims || {})};
+    if (tipo === "superAdmin") {
+        claims.superAdmin = true;
+    } else {
+        claims.mesquita = mesquitaId;
+    }
+    await admin.auth().setCustomUserClaims(uid, claims);
+
+    return {ok: true};
+});
 
 // Nomes legíveis para cada campo que pode mudar no painel de admin.
 // Antes disto, o texto da notificação era construído a dividir o
@@ -175,60 +269,123 @@ exports.notificarNovoAviso = onValueWritten(
     }
 );
 
+// Credenciais do email que envia os avisos de aprovação. Guardadas no
+// Secret Manager — nunca no código. Definir uma vez com:
+//   firebase functions:secrets:set SMTP_USER   (ex: o Gmail do MosqueNow)
+//   firebase functions:secrets:set SMTP_PASS   (palavra-passe de aplicação)
+const SMTP_USER = defineSecret("SMTP_USER");
+const SMTP_PASS = defineSecret("SMTP_PASS");
+
+function escaparHtml(texto) {
+    return String(texto).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+    })[c]);
+}
+
+async function enviarEmailAprovacao(para, nomeMesquita) {
+    const transporte = nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true,
+        auth: {user: SMTP_USER.value(), pass: SMTP_PASS.value()},
+    });
+
+    const nome = escaparHtml(nomeMesquita);
+    await transporte.sendMail({
+        from: `"MosqueNow" <${SMTP_USER.value()}>`,
+        to: para,
+        subject: `✅ ${nomeMesquita} foi aprovada no MosqueNow`,
+        text:
+            "Assalamu alaikum,\n\n" +
+            `A mesquita "${nomeMesquita}" foi aprovada no MosqueNow.\n\n` +
+            "Para configurar os horários de oração e publicar avisos:\n" +
+            "1. Abra a app MosqueNow\n" +
+            "2. Vá a Mais → Admin\n" +
+            "3. Toque em \"Sou administrador de uma mesquita registada\"\n" +
+            "4. Entre com esta mesma conta Google\n\n" +
+            "Jazakallahu khairan,\nEquipa MosqueNow",
+        html:
+            "<p>Assalamu alaikum,</p>" +
+            `<p>A mesquita <b>${nome}</b> foi aprovada no MosqueNow. ✅</p>` +
+            "<p>Para configurar os horários de oração e publicar avisos:</p>" +
+            "<ol><li>Abra a app MosqueNow</li><li>Vá a <b>Mais → Admin</b></li>" +
+            "<li>Toque em <b>“Sou administrador de uma mesquita registada”</b></li>" +
+            "<li>Entre com <b>esta mesma conta Google</b></li></ol>" +
+            "<p>Jazakallahu khairan,<br>Equipa MosqueNow</p>",
+    });
+}
+
 exports.notificarAprovacaoMesquita = onValueWritten(
     {
         ref: "/mesquitas/{uid}",
         region: "europe-west1",
+        secrets: [SMTP_USER, SMTP_PASS],
     },
     async (event) => {
-        try {
-            const before = event.data.before;
-            const after = event.data.after;
+        const before = event.data.before;
+        const after = event.data.after;
 
-            // Só interessa a criação inicial feita pela aprovação do
-            // super-admin — não disparar em cada actualização posterior.
-            if (before.exists()) return null;
-            if (!after.exists()) return null;
+        // Só interessa a criação inicial feita pela aprovação do
+        // super-admin — não disparar em cada actualização posterior.
+        if (before.exists() || !after.exists()) return null;
 
-            const dados = after.val();
-            const token = dados.fcm_token_admin;
-            if (!token) return null;
+        const dados = after.val() || {};
+        // Só mesquitas vindas do registo (têm admin_uid) — não as criadas
+        // à mão na consola.
+        if (!dados.admin_uid) return null;
 
-            console.log("📡 Enviando notificação de aprovação de mesquita");
+        const nomeMesquita = dados.nome || "A sua mesquita";
 
-            await admin.messaging().send({
-                token,
-                notification: {
-                    title: "✅ Mesquita aprovada",
-                    body: `A "${dados.nome || "sua mesquita"}" foi aprovada! ` +
-                        "Entre para configurar os horários de oração.",
-                },
-                android: {
-                    priority: "high",
+        // 1) Notificação push no telemóvel onde foi feito o registo.
+        //    Independente do email: uma falha num não impede o outro.
+        const token = dados.fcm_token_admin;
+        if (token) {
+            try {
+                await admin.messaging().send({
+                    token,
                     notification: {
-                        channelId: "mesquita_channel",
-                        priority: "max",
-                        defaultSound: true,
-                        defaultVibrateTimings: true,
+                        title: "✅ Mesquita aprovada",
+                        body: `A "${nomeMesquita}" foi aprovada! ` +
+                            "Entre para configurar os horários de oração.",
                     },
-                },
-                apns: {
-                    payload: {
-                        aps: {
-                            sound: "default",
+                    android: {
+                        priority: "high",
+                        notification: {
+                            channelId: "mesquita_channel",
+                            priority: "max",
+                            defaultSound: true,
+                            defaultVibrateTimings: true,
                         },
                     },
-                },
-            });
-
-            // Limpa o token para não voltar a disparar em futuras alterações.
-            await event.data.after.ref.update({fcm_token_admin: null});
-
-            return null;
-        } catch (error) {
-            console.error("❌ Erro ao notificar aprovação de mesquita:", error);
-            return null;
+                    apns: {payload: {aps: {sound: "default"}}},
+                });
+            } catch (error) {
+                console.error("❌ Push de aprovação falhou:", error);
+            }
+            // Limpa o token (deixa de ser necessário e não fica público).
+            await after.ref.update({fcm_token_admin: null});
         }
+
+        // 2) Email para a conta Google usada no registo (a mesma com que o
+        //    admin vai entrar). O email escrito no formulário é o recurso.
+        try {
+            let para = null;
+            try {
+                para = (await admin.auth().getUser(event.params.uid)).email;
+            } catch (_) {
+                // utilizador apagado — usa o email do formulário
+            }
+            para = para || dados.email_admin;
+            if (!para) {
+                console.warn(`Sem email para avisar ${event.params.uid}`);
+                return null;
+            }
+            await enviarEmailAprovacao(para, nomeMesquita);
+            console.log(`📧 Email de aprovação enviado (${event.params.uid})`);
+        } catch (error) {
+            console.error("❌ Email de aprovação falhou:", error);
+        }
+        return null;
     }
 );
 

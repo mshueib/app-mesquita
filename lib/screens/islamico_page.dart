@@ -3,7 +3,8 @@ import 'quran_page.dart';
 import 'duas_page.dart';
 import 'hadith_page.dart';
 
-/// Página "Islâmico" — Alcorão, Duas e Hadith em 3 separadores.
+/// Página "Islâmico" — Alcorão (árabe e português no mesmo separador),
+/// Duas e Hadith em 3 separadores.
 /// Vive dentro do PageView principal, por isso não tem AppBar
 /// própria (usa a barra do topo da Início).
 class IslamicoPage extends StatelessWidget {

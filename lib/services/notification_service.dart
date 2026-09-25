@@ -1,3 +1,4 @@
+import 'package:azan_player/azan_player.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -47,19 +48,17 @@ class NotificationService {
     enableVibration: true,
   );
 
-  // Canal separado porque o som de um canal Android não pode ser
-  // alterado depois de criado — precisa de um canal próprio para tocar
-  // o áudio do Azan em vez do som de notificação padrão.
-  static const AndroidNotificationChannel azanChannelComSom =
-      AndroidNotificationChannel(
+  // Canais antigos que já não são usados — removidos para não ficarem
+  // duplicados nas definições de notificações do telemóvel.
+  // azan_channel_som_v3: o som do Azan como som de notificação era
+  // cortado pelo Android ao abrir a barra de notificações — agora é
+  // tocado pelo plugin azan_player (ver [scheduleAzan]).
+  static const List<String> _canaisObsoletos = [
+    'azan_channel',
+    'azan_channel_som',
     'azan_channel_som_v2',
-    'Alarme de Azan (com som do Azan)',
-    description: 'Alarme diário para os horários de oração, a tocar o Azan',
-    importance: Importance.max,
-    playSound: true,
-    sound: RawResourceAndroidNotificationSound('azan'),
-    enableVibration: true,
-  );
+    'azan_channel_som_v3',
+  ];
 
   static Future<void> initialize() async {
     const androidSettings =
@@ -78,13 +77,11 @@ class NotificationService {
 
     await androidImplementation?.createNotificationChannel(channel);
     await androidImplementation?.createNotificationChannel(azanChannel);
-    // Isolado em try/catch: se o ficheiro de som do Azan (raw/azan.mp3)
-    // tiver algum problema, isto não pode impedir a criação dos canais
-    // anteriores nem travar o resto da inicialização das notificações.
-    try {
-      await androidImplementation?.createNotificationChannel(azanChannelComSom);
-    } catch (e) {
-      print("⚠️ Não foi possível criar o canal de som do Azan: $e");
+
+    for (final id in _canaisObsoletos) {
+      try {
+        await androidImplementation?.deleteNotificationChannel(channelId: id);
+      } catch (_) {}
     }
   }
 
@@ -110,6 +107,12 @@ class NotificationService {
     );
   }
 
+  /// Agenda o alarme diário de uma oração.
+  ///
+  /// Com [tocarSom], o Azan é tocado pelo plugin azan_player (serviço
+  /// Android em primeiro plano): assim não é cortado ao abrir a barra de
+  /// notificações, só pára com "Parar Azan" ou uma tecla de volume.
+  /// Sem som, fica uma notificação normal agendada.
   static Future<void> scheduleAzan({
     required String prayerName,
     required int hour,
@@ -117,6 +120,12 @@ class NotificationService {
     required int id,
     bool tocarSom = false,
   }) async {
+    if (tocarSom) {
+      await AzanPlayer.agendar(
+          id: id, nome: prayerName, hora: hour, minuto: minute);
+      return;
+    }
+
     final now = tz.TZDateTime.now(tz.local);
 
     tz.TZDateTime scheduledDate = tz.TZDateTime(
@@ -133,24 +142,15 @@ class NotificationService {
     }
 
     final androidDetails = AndroidNotificationDetails(
-      tocarSom ? azanChannelComSom.id : azanChannel.id,
-      tocarSom ? azanChannelComSom.name : azanChannel.name,
-      channelDescription: tocarSom
-          ? azanChannelComSom.description
-          : azanChannel.description,
+      azanChannel.id,
+      azanChannel.name,
+      channelDescription: azanChannel.description,
       importance: Importance.max,
       priority: Priority.max,
       playSound: true,
-      sound: tocarSom
-          ? const RawResourceAndroidNotificationSound('azan')
-          : null,
       enableVibration: true,
       category: AndroidNotificationCategory.alarm,
       visibility: NotificationVisibility.public,
-    );
-
-    final notificationDetails = NotificationDetails(
-      android: androidDetails,
     );
 
     await _notifications.zonedSchedule(
@@ -158,19 +158,37 @@ class NotificationService {
       title: "🕌 Hora do $prayerName",
       body: "Está na hora do Azan",
       scheduledDate: scheduledDate,
-      notificationDetails: notificationDetails,
+      notificationDetails: NotificationDetails(android: androidDetails),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
-
-    print("🕌 Agendado $prayerName para "
-        "${scheduledDate.hour}:${scheduledDate.minute} "
-        "(agora=${now.hour}:${now.minute}) "
-        "→ daqui a ${scheduledDate.difference(now).inMinutes} min");
   }
 
+  /// Cancela os alarmes de Azan agendados (os dois tipos: notificação
+  /// simples e Azan com som). Não pára um Azan que esteja a tocar.
+  ///
+  /// `cancel(id)` também remove a notificação se estiver visível. Como a
+  /// app reagenda os alarmes sempre que abre ou recebe dados novos, uma
+  /// notificação de Azan que esteja a ser mostrada não é cancelada: o
+  /// novo zonedSchedule com o mesmo id substitui o agendamento pendente.
   static Future<void> cancelarAzan() async {
+    try {
+      await AzanPlayer.cancelarTodos();
+    } catch (_) {}
+
+    final visiveis = <int>{};
+    try {
+      final activas = await _notifications
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.getActiveNotifications();
+      for (final n in activas ?? const <ActiveNotification>[]) {
+        if (n.id != null) visiveis.add(n.id!);
+      }
+    } catch (_) {}
+
     for (var id in azanIds.values) {
+      if (visiveis.contains(id)) continue;
       await _notifications.cancel(id: id);
     }
   }

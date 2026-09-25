@@ -1,0 +1,36 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+    <application>
+        <!-- Toca o Azan com MediaPlayer. Ao contrário do som de uma
+             notificação, não é silenciado ao abrir a barra de notificações. -->
+        <service
+            android:name=".AzanPlayerService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback"/>
+
+        <!-- Disparado pelo AlarmManager na hora de cada oração. -->
+        <receiver
+            android:name=".AzanAlarmReceiver"
+            android:exported="false"/>
+
+        <!-- Os alarmes do AlarmManager perdem-se ao reiniciar o telemóvel
+             ou ao actualizar a app — este receiver volta a agendá-los. -->
+        <receiver
+            android:name=".AzanBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

@@ -1,68 +1,196 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+
 import 'local_storage_service.dart';
 
 class SurahInfo {
   final int numero;
-  final String nomeArabe;
-  final String nomeIngles;
-  final String traducaoIngles;
-  final int numeroAyahs;
+  final String nome;
+  final int juzInicial;
 
-  const SurahInfo({
-    required this.numero,
-    required this.nomeArabe,
-    required this.nomeIngles,
-    required this.traducaoIngles,
-    required this.numeroAyahs,
-  });
+  const SurahInfo(this.numero, this.nome, this.juzInicial);
 }
 
 class QuranMarcador {
   final String nome;
-  final int surah;
-  final int ayah;
-  final String surahNome;
+  final int juz;
+  final int pagina;
   final DateTime criadoEm;
 
   QuranMarcador({
     required this.nome,
-    required this.surah,
-    required this.ayah,
-    required this.surahNome,
+    required this.juz,
+    required this.pagina,
     required this.criadoEm,
   });
 
   Map<String, dynamic> toJson() => {
         "nome": nome,
-        "surah": surah,
-        "ayah": ayah,
-        "surahNome": surahNome,
+        "juz": juz,
+        "pagina": pagina,
         "criadoEm": criadoEm.toIso8601String(),
       };
 
   factory QuranMarcador.fromJson(Map<String, dynamic> json) => QuranMarcador(
         nome: json["nome"] as String? ?? "Marcador",
-        surah: json["surah"] as int,
-        ayah: json["ayah"] as int,
-        surahNome: json["surahNome"] as String,
+        juz: json["juz"] as int,
+        pagina: json["pagina"] as int,
         criadoEm: DateTime.parse(json["criadoEm"] as String),
       );
 }
 
-/// Metadados das 114 suras (números/nomes/nº de versículos) — dado
-/// bibliográfico embutido no app, sem precisar de rede. O texto do
-/// Alcorão em si (Mushaf Indopak 13 linhas) vem de
-/// [IndopakMushafService], já embutido como asset da app.
+/// Mushaf de 13 linhas em PDF, um ficheiro por juz, publicado por
+/// dawatehidayat.org. Cada juz é descarregado na primeira vez que é
+/// aberto e fica guardado no telemóvel para leitura offline.
 class QuranService {
-  static List<SurahInfo> listarSurahs() => _lista;
+  static const int totalJuz = 30;
 
-  static SurahInfo? porNumero(int numero) {
-    for (final s in _lista) {
-      if (s.numero == numero) return s;
-    }
-    return null;
+  static String urlJuz(int juz) =>
+      "https://dawatehidayat.org/downloads/quran/13line/"
+      "juz${juz.toString().padLeft(2, '0')}.pdf";
+
+  static Future<File> ficheiroJuz(int juz) async {
+    final base = await getApplicationDocumentsDirectory();
+    final pasta = Directory("${base.path}/quran13");
+    if (!await pasta.exists()) await pasta.create(recursive: true);
+    return File("${pasta.path}/juz${juz.toString().padLeft(2, '0')}.pdf");
   }
 
-  // ---------------- Marcadores (múltiplos, únicos por versículo) ----------------
+  static Future<bool> juzDescarregado(int juz) async =>
+      (await ficheiroJuz(juz)).exists();
+
+  static Future<Set<int>> juzesDescarregados() async {
+    final resultado = <int>{};
+    for (var juz = 1; juz <= totalJuz; juz++) {
+      if (await juzDescarregado(juz)) resultado.add(juz);
+    }
+    return resultado;
+  }
+
+  /// Descarrega o PDF do juz. Grava primeiro num ficheiro ".part" e só
+  /// o renomeia no fim — assim um download interrompido nunca fica
+  /// confundido com um PDF completo.
+  ///
+  /// Se o mesmo juz já estiver a ser descarregado (ex: pelo "Descarregar
+  /// tudo" enquanto o utilizador o abre), reutiliza esse download em vez
+  /// de ter dois a escrever no mesmo ficheiro.
+  static Future<File> descarregarJuz(
+    int juz, {
+    void Function(double progresso)? onProgresso,
+  }) {
+    final emCurso = _downloadsEmCurso[juz];
+    if (emCurso != null) {
+      _ouvintesProgresso[juz]?.add(onProgresso);
+      return emCurso;
+    }
+    _ouvintesProgresso[juz] = [onProgresso];
+    final futuro = _descarregarJuz(juz, (p) {
+      for (final ouvinte in _ouvintesProgresso[juz] ?? const []) {
+        ouvinte?.call(p);
+      }
+    }).whenComplete(() {
+      _downloadsEmCurso.remove(juz);
+      _ouvintesProgresso.remove(juz);
+    });
+    _downloadsEmCurso[juz] = futuro;
+    return futuro;
+  }
+
+  static final Map<int, Future<File>> _downloadsEmCurso = {};
+  static final Map<int, List<void Function(double)?>> _ouvintesProgresso = {};
+
+  static Future<File> _descarregarJuz(
+    int juz,
+    void Function(double progresso) onProgresso,
+  ) async {
+    final destino = await ficheiroJuz(juz);
+    final temporario = File("${destino.path}.part");
+
+    final cliente = http.Client();
+    try {
+      final resposta =
+          await cliente.send(http.Request("GET", Uri.parse(urlJuz(juz))));
+      if (resposta.statusCode != 200) {
+        throw HttpException("Erro ${resposta.statusCode} ao descarregar o Juz $juz");
+      }
+
+      final total = resposta.contentLength ?? 0;
+      var recebido = 0;
+      final escrita = temporario.openWrite();
+      try {
+        await for (final bloco in resposta.stream) {
+          escrita.add(bloco);
+          recebido += bloco.length;
+          if (total > 0) onProgresso(recebido / total);
+        }
+      } finally {
+        await escrita.close();
+      }
+
+      return await temporario.rename(destino.path);
+    } catch (_) {
+      if (await temporario.exists()) await temporario.delete();
+      rethrow;
+    } finally {
+      cliente.close();
+    }
+  }
+
+  // ---------------- Descarregar o Alcorão completo ----------------
+
+  /// Juz a ser descarregado neste momento pelo "Descarregar tudo"
+  /// (null = parado). Fica no serviço, e não no ecrã, para o download
+  /// continuar se o utilizador mudar de separador.
+  static final ValueNotifier<int?> downloadTudoJuz = ValueNotifier(null);
+
+  /// Progresso (0–1) do Alcorão completo.
+  static final ValueNotifier<double> downloadTudoProgresso = ValueNotifier(0);
+
+  static bool _cancelarDownloadTudo = false;
+
+  static bool get aDescarregarTudo => downloadTudoJuz.value != null;
+
+  /// Descarrega, um a um, os juz que ainda faltam. Devolve quantos
+  /// falharam (0 = tudo certo). Um cancelamento só tem efeito entre
+  /// juz, para nunca deixar um ficheiro a meio.
+  static Future<int> descarregarTudo() async {
+    if (aDescarregarTudo) return 0;
+    _cancelarDownloadTudo = false;
+    var falhas = 0;
+
+    try {
+      for (var juz = 1; juz <= totalJuz; juz++) {
+        if (_cancelarDownloadTudo) break;
+        downloadTudoJuz.value = juz;
+        downloadTudoProgresso.value = (juz - 1) / totalJuz;
+        if (await juzDescarregado(juz)) continue;
+
+        try {
+          await descarregarJuz(juz, onProgresso: (p) {
+            downloadTudoProgresso.value = (juz - 1 + p) / totalJuz;
+          });
+        } catch (_) {
+          falhas++;
+        }
+      }
+    } finally {
+      downloadTudoJuz.value = null;
+      downloadTudoProgresso.value = 0;
+    }
+    return falhas;
+  }
+
+  static void cancelarDownloadTudo() => _cancelarDownloadTudo = true;
+
+  static Future<void> apagarJuz(int juz) async {
+    final ficheiro = await ficheiroJuz(juz);
+    if (await ficheiro.exists()) await ficheiro.delete();
+  }
+
+  // ---------------- Marcadores (por página, únicos por página) ----------------
 
   static Future<List<QuranMarcador>> listarMarcadores() async {
     final lista = await LocalStorageService.carregarMarcadoresQuran();
@@ -70,12 +198,12 @@ class QuranService {
       ..sort((a, b) => b.criadoEm.compareTo(a.criadoEm));
   }
 
-  /// Grava um marcador nomeado. Se já existir um marcador neste
-  /// versículo exato, substitui-o (nome + data) em vez de duplicar.
+  /// Grava um marcador nomeado. Se já existir um marcador nesta página
+  /// exacta, substitui-o (nome + data) em vez de duplicar.
   static Future<void> salvarMarcador(QuranMarcador marcador) async {
     final lista = await LocalStorageService.carregarMarcadoresQuran();
     lista.removeWhere(
-      (m) => m["surah"] == marcador.surah && m["ayah"] == marcador.ayah,
+      (m) => m["juz"] == marcador.juz && m["pagina"] == marcador.pagina,
     );
     lista.add(marcador.toJson());
     await LocalStorageService.salvarMarcadoresQuran(lista);
@@ -89,143 +217,163 @@ class QuranService {
 
   // ---------------- Continuar leitura (automático) ----------------
 
-  static Future<void> registarUltimaLeitura(int surah, int ayah) {
-    return LocalStorageService.salvarUltimaLeituraQuran(surah, ayah);
+  static Future<void> registarUltimaLeitura(int juz, int pagina) {
+    return LocalStorageService.salvarUltimaLeituraQuran(juz, pagina);
   }
 
   static Future<Map<String, dynamic>?> obterUltimaLeitura() {
     return LocalStorageService.carregarUltimaLeituraQuran();
   }
 
-  // ---------------- Suras principais (mais lidas) ----------------
+  // ---------------- Índice de suras → juz onde começam ----------------
 
-  static const List<int> suasPrincipais = [
-    1, // Al-Faatiha
-    36, // Ya-Sin
-    18, // Al-Kahf
-    32, // As-Sajda
-    55, // Ar-Rahmaan
-    56, // Al-Waaqia
-    67, // Al-Mulk
-    112, // Al-Ikhlaas
-    113, // Al-Falaq
-    114, // An-Naas
+  static List<SurahInfo> listarSurahs() => _suras;
+
+  // Página impressa (número no topo da página do Mushaf) onde começa cada
+  // juz e cada sura. Gerado a partir do layout "Indopak 13 linhas" (QUL) e
+  // confirmado nos PDFs: o PDF do Juz N começa na página impressa
+  // _paginaImpressaJuz[N-1] (o do Juz 1 começa na capa, página 1).
+  static const List<int> _paginaImpressaJuz = [
+    1, 29, 57, 85, 113, 141, 168, 197, 225, 253, 280, 309, 337, 364, 393, //
+    421, 449, 477, 505, 532, 559, 587, 613, 641, 667, 697, 727, 757, 787, 819,
   ];
 
-  static const List<SurahInfo> _lista = [
-    SurahInfo(numero: 1, nomeArabe: "سُورَةُ ٱلْفَاتِحَةِ", nomeIngles: "Al-Faatiha", traducaoIngles: "The Opening", numeroAyahs: 7),
-    SurahInfo(numero: 2, nomeArabe: "سُورَةُ البَقَرَةِ", nomeIngles: "Al-Baqara", traducaoIngles: "The Cow", numeroAyahs: 286),
-    SurahInfo(numero: 3, nomeArabe: "سُورَةُ آلِ عِمۡرَانَ", nomeIngles: "Aal-i-Imraan", traducaoIngles: "The Family of Imraan", numeroAyahs: 200),
-    SurahInfo(numero: 4, nomeArabe: "سُورَةُ النِّسَاءِ", nomeIngles: "An-Nisaa", traducaoIngles: "The Women", numeroAyahs: 176),
-    SurahInfo(numero: 5, nomeArabe: "سُورَةُ المَائـِدَةِ", nomeIngles: "Al-Maaida", traducaoIngles: "The Table", numeroAyahs: 120),
-    SurahInfo(numero: 6, nomeArabe: "سُورَةُ الأَنۡعَامِ", nomeIngles: "Al-An'aam", traducaoIngles: "The Cattle", numeroAyahs: 165),
-    SurahInfo(numero: 7, nomeArabe: "سُورَةُ الأَعۡرَافِ", nomeIngles: "Al-A'raaf", traducaoIngles: "The Heights", numeroAyahs: 206),
-    SurahInfo(numero: 8, nomeArabe: "سُورَةُ الأَنفَالِ", nomeIngles: "Al-Anfaal", traducaoIngles: "The Spoils of War", numeroAyahs: 75),
-    SurahInfo(numero: 9, nomeArabe: "سُورَةُ التَّوۡبَةِ", nomeIngles: "At-Tawba", traducaoIngles: "The Repentance", numeroAyahs: 129),
-    SurahInfo(numero: 10, nomeArabe: "سُورَةُ يُونُسَ", nomeIngles: "Yunus", traducaoIngles: "Jonas", numeroAyahs: 109),
-    SurahInfo(numero: 11, nomeArabe: "سُورَةُ هُودٍ", nomeIngles: "Hud", traducaoIngles: "Hud", numeroAyahs: 123),
-    SurahInfo(numero: 12, nomeArabe: "سُورَةُ يُوسُفَ", nomeIngles: "Yusuf", traducaoIngles: "Joseph", numeroAyahs: 111),
-    SurahInfo(numero: 13, nomeArabe: "سُورَةُ الرَّعۡدِ", nomeIngles: "Ar-Ra'd", traducaoIngles: "The Thunder", numeroAyahs: 43),
-    SurahInfo(numero: 14, nomeArabe: "سُورَةُ إِبۡرَاهِيمَ", nomeIngles: "Ibrahim", traducaoIngles: "Abraham", numeroAyahs: 52),
-    SurahInfo(numero: 15, nomeArabe: "سُورَةُ الحِجۡرِ", nomeIngles: "Al-Hijr", traducaoIngles: "The Rock", numeroAyahs: 99),
-    SurahInfo(numero: 16, nomeArabe: "سُورَةُ النَّحۡلِ", nomeIngles: "An-Nahl", traducaoIngles: "The Bee", numeroAyahs: 128),
-    SurahInfo(numero: 17, nomeArabe: "سُورَةُ الإِسۡرَاءِ", nomeIngles: "Al-Israa", traducaoIngles: "The Night Journey", numeroAyahs: 111),
-    SurahInfo(numero: 18, nomeArabe: "سُورَةُ الكَهۡفِ", nomeIngles: "Al-Kahf", traducaoIngles: "The Cave", numeroAyahs: 110),
-    SurahInfo(numero: 19, nomeArabe: "سُورَةُ مَرۡيَمَ", nomeIngles: "Maryam", traducaoIngles: "Mary", numeroAyahs: 98),
-    SurahInfo(numero: 20, nomeArabe: "سُورَةُ طه", nomeIngles: "Taa-Haa", traducaoIngles: "Taa-Haa", numeroAyahs: 135),
-    SurahInfo(numero: 21, nomeArabe: "سُورَةُ الأَنبِيَاءِ", nomeIngles: "Al-Anbiyaa", traducaoIngles: "The Prophets", numeroAyahs: 112),
-    SurahInfo(numero: 22, nomeArabe: "سُورَةُ الحَجِّ", nomeIngles: "Al-Hajj", traducaoIngles: "The Pilgrimage", numeroAyahs: 78),
-    SurahInfo(numero: 23, nomeArabe: "سُورَةُ المُؤۡمِنُونَ", nomeIngles: "Al-Muminoon", traducaoIngles: "The Believers", numeroAyahs: 118),
-    SurahInfo(numero: 24, nomeArabe: "سُورَةُ النُّورِ", nomeIngles: "An-Noor", traducaoIngles: "The Light", numeroAyahs: 64),
-    SurahInfo(numero: 25, nomeArabe: "سُورَةُ الفُرۡقَانِ", nomeIngles: "Al-Furqaan", traducaoIngles: "The Criterion", numeroAyahs: 77),
-    SurahInfo(numero: 26, nomeArabe: "سُورَةُ الشُّعَرَاءِ", nomeIngles: "Ash-Shu'araa", traducaoIngles: "The Poets", numeroAyahs: 227),
-    SurahInfo(numero: 27, nomeArabe: "سُورَةُ النَّمۡلِ", nomeIngles: "An-Naml", traducaoIngles: "The Ant", numeroAyahs: 93),
-    SurahInfo(numero: 28, nomeArabe: "سُورَةُ القَصَصِ", nomeIngles: "Al-Qasas", traducaoIngles: "The Stories", numeroAyahs: 88),
-    SurahInfo(numero: 29, nomeArabe: "سُورَةُ العَنكَبُوتِ", nomeIngles: "Al-Ankaboot", traducaoIngles: "The Spider", numeroAyahs: 69),
-    SurahInfo(numero: 30, nomeArabe: "سُورَةُ الرُّومِ", nomeIngles: "Ar-Room", traducaoIngles: "The Romans", numeroAyahs: 60),
-    SurahInfo(numero: 31, nomeArabe: "سُورَةُ لُقۡمَانَ", nomeIngles: "Luqman", traducaoIngles: "Luqman", numeroAyahs: 34),
-    SurahInfo(numero: 32, nomeArabe: "سُورَةُ السَّجۡدَةِ", nomeIngles: "As-Sajda", traducaoIngles: "The Prostration", numeroAyahs: 30),
-    SurahInfo(numero: 33, nomeArabe: "سُورَةُ الأَحۡزَابِ", nomeIngles: "Al-Ahzaab", traducaoIngles: "The Clans", numeroAyahs: 73),
-    SurahInfo(numero: 34, nomeArabe: "سُورَةُ سَبَإٍ", nomeIngles: "Saba", traducaoIngles: "Sheba", numeroAyahs: 54),
-    SurahInfo(numero: 35, nomeArabe: "سُورَةُ فَاطِرٍ", nomeIngles: "Faatir", traducaoIngles: "The Originator", numeroAyahs: 45),
-    SurahInfo(numero: 36, nomeArabe: "سُورَةُ يسٓ", nomeIngles: "Yaseen", traducaoIngles: "Yaseen", numeroAyahs: 83),
-    SurahInfo(numero: 37, nomeArabe: "سُورَةُ الصَّافَّاتِ", nomeIngles: "As-Saaffaat", traducaoIngles: "Those drawn up in Ranks", numeroAyahs: 182),
-    SurahInfo(numero: 38, nomeArabe: "سُورَةُ صٓ", nomeIngles: "Saad", traducaoIngles: "The letter Saad", numeroAyahs: 88),
-    SurahInfo(numero: 39, nomeArabe: "سُورَةُ الزُّمَرِ", nomeIngles: "Az-Zumar", traducaoIngles: "The Groups", numeroAyahs: 75),
-    SurahInfo(numero: 40, nomeArabe: "سُورَةُ غَافِرٍ", nomeIngles: "Ghafir", traducaoIngles: "The Forgiver", numeroAyahs: 85),
-    SurahInfo(numero: 41, nomeArabe: "سُورَةُ فُصِّلَتۡ", nomeIngles: "Fussilat", traducaoIngles: "Explained in detail", numeroAyahs: 54),
-    SurahInfo(numero: 42, nomeArabe: "سُورَةُ الشُّورَىٰ", nomeIngles: "Ash-Shura", traducaoIngles: "Consultation", numeroAyahs: 53),
-    SurahInfo(numero: 43, nomeArabe: "سُورَةُ الزُّخۡرُفِ", nomeIngles: "Az-Zukhruf", traducaoIngles: "Ornaments of gold", numeroAyahs: 89),
-    SurahInfo(numero: 44, nomeArabe: "سُورَةُ الدُّخَانِ", nomeIngles: "Ad-Dukhaan", traducaoIngles: "The Smoke", numeroAyahs: 59),
-    SurahInfo(numero: 45, nomeArabe: "سُورَةُ الجَاثِيَةِ", nomeIngles: "Al-Jaathiya", traducaoIngles: "Crouching", numeroAyahs: 37),
-    SurahInfo(numero: 46, nomeArabe: "سُورَةُ الأَحۡقَافِ", nomeIngles: "Al-Ahqaf", traducaoIngles: "The Dunes", numeroAyahs: 35),
-    SurahInfo(numero: 47, nomeArabe: "سُورَةُ مُحَمَّدٍ", nomeIngles: "Muhammad", traducaoIngles: "Muhammad", numeroAyahs: 38),
-    SurahInfo(numero: 48, nomeArabe: "سُورَةُ الفَتۡحِ", nomeIngles: "Al-Fath", traducaoIngles: "The Victory", numeroAyahs: 29),
-    SurahInfo(numero: 49, nomeArabe: "سُورَةُ الحُجُرَاتِ", nomeIngles: "Al-Hujuraat", traducaoIngles: "The Inner Apartments", numeroAyahs: 18),
-    SurahInfo(numero: 50, nomeArabe: "سُورَةُ قٓ", nomeIngles: "Qaaf", traducaoIngles: "The letter Qaaf", numeroAyahs: 45),
-    SurahInfo(numero: 51, nomeArabe: "سُورَةُ الذَّارِيَاتِ", nomeIngles: "Adh-Dhaariyat", traducaoIngles: "The Winnowing Winds", numeroAyahs: 60),
-    SurahInfo(numero: 52, nomeArabe: "سُورَةُ الطُّورِ", nomeIngles: "At-Tur", traducaoIngles: "The Mount", numeroAyahs: 49),
-    SurahInfo(numero: 53, nomeArabe: "سُورَةُ النَّجۡمِ", nomeIngles: "An-Najm", traducaoIngles: "The Star", numeroAyahs: 62),
-    SurahInfo(numero: 54, nomeArabe: "سُورَةُ القَمَرِ", nomeIngles: "Al-Qamar", traducaoIngles: "The Moon", numeroAyahs: 55),
-    SurahInfo(numero: 55, nomeArabe: "سُورَةُ الرَّحۡمَٰن", nomeIngles: "Ar-Rahmaan", traducaoIngles: "The Beneficent", numeroAyahs: 78),
-    SurahInfo(numero: 56, nomeArabe: "سُورَةُ الوَاقِعَةِ", nomeIngles: "Al-Waaqia", traducaoIngles: "The Inevitable", numeroAyahs: 96),
-    SurahInfo(numero: 57, nomeArabe: "سُورَةُ الحَدِيدِ", nomeIngles: "Al-Hadid", traducaoIngles: "The Iron", numeroAyahs: 29),
-    SurahInfo(numero: 58, nomeArabe: "سُورَةُ المُجَادلَةِ", nomeIngles: "Al-Mujaadila", traducaoIngles: "The Pleading Woman", numeroAyahs: 22),
-    SurahInfo(numero: 59, nomeArabe: "سُورَةُ الحَشۡرِ", nomeIngles: "Al-Hashr", traducaoIngles: "The Exile", numeroAyahs: 24),
-    SurahInfo(numero: 60, nomeArabe: "سُورَةُ المُمۡتَحنَةِ", nomeIngles: "Al-Mumtahana", traducaoIngles: "She that is to be examined", numeroAyahs: 13),
-    SurahInfo(numero: 61, nomeArabe: "سُورَةُ الصَّفِّ", nomeIngles: "As-Saff", traducaoIngles: "The Ranks", numeroAyahs: 14),
-    SurahInfo(numero: 62, nomeArabe: "سُورَةُ الجُمُعَةِ", nomeIngles: "Al-Jumu'a", traducaoIngles: "Friday", numeroAyahs: 11),
-    SurahInfo(numero: 63, nomeArabe: "سُورَةُ المُنَافِقُونَ", nomeIngles: "Al-Munaafiqoon", traducaoIngles: "The Hypocrites", numeroAyahs: 11),
-    SurahInfo(numero: 64, nomeArabe: "سُورَةُ التَّغَابُنِ", nomeIngles: "At-Taghaabun", traducaoIngles: "Mutual Disillusion", numeroAyahs: 18),
-    SurahInfo(numero: 65, nomeArabe: "سُورَةُ الطَّلَاقِ", nomeIngles: "At-Talaaq", traducaoIngles: "Divorce", numeroAyahs: 12),
-    SurahInfo(numero: 66, nomeArabe: "سُورَةُ التَّحۡرِيمِ", nomeIngles: "At-Tahrim", traducaoIngles: "The Prohibition", numeroAyahs: 12),
-    SurahInfo(numero: 67, nomeArabe: "سُورَةُ المُلۡكِ", nomeIngles: "Al-Mulk", traducaoIngles: "The Sovereignty", numeroAyahs: 30),
-    SurahInfo(numero: 68, nomeArabe: "سُورَةُ القَلَمِ", nomeIngles: "Al-Qalam", traducaoIngles: "The Pen", numeroAyahs: 52),
-    SurahInfo(numero: 69, nomeArabe: "سُورَةُ الحَاقَّةِ", nomeIngles: "Al-Haaqqa", traducaoIngles: "The Reality", numeroAyahs: 52),
-    SurahInfo(numero: 70, nomeArabe: "سُورَةُ المَعَارِجِ", nomeIngles: "Al-Ma'aarij", traducaoIngles: "The Ascending Stairways", numeroAyahs: 44),
-    SurahInfo(numero: 71, nomeArabe: "سُورَةُ نُوحٍ", nomeIngles: "Nooh", traducaoIngles: "Noah", numeroAyahs: 28),
-    SurahInfo(numero: 72, nomeArabe: "سُورَةُ الجِنِّ", nomeIngles: "Al-Jinn", traducaoIngles: "The Jinn", numeroAyahs: 28),
-    SurahInfo(numero: 73, nomeArabe: "سُورَةُ المُزَّمِّلِ", nomeIngles: "Al-Muzzammil", traducaoIngles: "The Enshrouded One", numeroAyahs: 20),
-    SurahInfo(numero: 74, nomeArabe: "سُورَةُ المُدَّثِّرِ", nomeIngles: "Al-Muddaththir", traducaoIngles: "The Cloaked One", numeroAyahs: 56),
-    SurahInfo(numero: 75, nomeArabe: "سُورَةُ القِيَامَةِ", nomeIngles: "Al-Qiyaama", traducaoIngles: "The Resurrection", numeroAyahs: 40),
-    SurahInfo(numero: 76, nomeArabe: "سُورَةُ الإِنسَانِ", nomeIngles: "Al-Insaan", traducaoIngles: "Man", numeroAyahs: 31),
-    SurahInfo(numero: 77, nomeArabe: "سُورَةُ المُرۡسَلَاتِ", nomeIngles: "Al-Mursalaat", traducaoIngles: "Those sent forth", numeroAyahs: 50),
-    SurahInfo(numero: 78, nomeArabe: "سُورَةُ النَّبَإِ", nomeIngles: "An-Naba", traducaoIngles: "The Announcement", numeroAyahs: 40),
-    SurahInfo(numero: 79, nomeArabe: "سُورَةُ النَّازِعَاتِ", nomeIngles: "An-Naazi'aat", traducaoIngles: "Those who drag forth", numeroAyahs: 46),
-    SurahInfo(numero: 80, nomeArabe: "سُورَةُ عَبَسَ", nomeIngles: "Abasa", traducaoIngles: "He frowned", numeroAyahs: 42),
-    SurahInfo(numero: 81, nomeArabe: "سُورَةُ التَّكۡوِيرِ", nomeIngles: "At-Takwir", traducaoIngles: "The Overthrowing", numeroAyahs: 29),
-    SurahInfo(numero: 82, nomeArabe: "سُورَةُ الانفِطَارِ", nomeIngles: "Al-Infitaar", traducaoIngles: "The Cleaving", numeroAyahs: 19),
-    SurahInfo(numero: 83, nomeArabe: "سُورَةُ المُطَفِّفِينَ", nomeIngles: "Al-Mutaffifin", traducaoIngles: "Defrauding", numeroAyahs: 36),
-    SurahInfo(numero: 84, nomeArabe: "سُورَةُ الانشِقَاقِ", nomeIngles: "Al-Inshiqaaq", traducaoIngles: "The Splitting Open", numeroAyahs: 25),
-    SurahInfo(numero: 85, nomeArabe: "سُورَةُ البُرُوجِ", nomeIngles: "Al-Burooj", traducaoIngles: "The Constellations", numeroAyahs: 22),
-    SurahInfo(numero: 86, nomeArabe: "سُورَةُ الطَّارِقِ", nomeIngles: "At-Taariq", traducaoIngles: "The Morning Star", numeroAyahs: 17),
-    SurahInfo(numero: 87, nomeArabe: "سُورَةُ الأَعۡلَىٰ", nomeIngles: "Al-A'laa", traducaoIngles: "The Most High", numeroAyahs: 19),
-    SurahInfo(numero: 88, nomeArabe: "سُورَةُ الغَاشِيَةِ", nomeIngles: "Al-Ghaashiya", traducaoIngles: "The Overwhelming", numeroAyahs: 26),
-    SurahInfo(numero: 89, nomeArabe: "سُورَةُ الفَجۡرِ", nomeIngles: "Al-Fajr", traducaoIngles: "The Dawn", numeroAyahs: 30),
-    SurahInfo(numero: 90, nomeArabe: "سُورَةُ البَلَدِ", nomeIngles: "Al-Balad", traducaoIngles: "The City", numeroAyahs: 20),
-    SurahInfo(numero: 91, nomeArabe: "سُورَةُ الشَّمۡسِ", nomeIngles: "Ash-Shams", traducaoIngles: "The Sun", numeroAyahs: 15),
-    SurahInfo(numero: 92, nomeArabe: "سُورَةُ اللَّيۡلِ", nomeIngles: "Al-Lail", traducaoIngles: "The Night", numeroAyahs: 21),
-    SurahInfo(numero: 93, nomeArabe: "سُورَةُ الضُّحَىٰ", nomeIngles: "Ad-Dhuhaa", traducaoIngles: "The Morning Hours", numeroAyahs: 11),
-    SurahInfo(numero: 94, nomeArabe: "سُورَةُ الشَّرۡحِ", nomeIngles: "Ash-Sharh", traducaoIngles: "The Consolation", numeroAyahs: 8),
-    SurahInfo(numero: 95, nomeArabe: "سُورَةُ التِّينِ", nomeIngles: "At-Tin", traducaoIngles: "The Fig", numeroAyahs: 8),
-    SurahInfo(numero: 96, nomeArabe: "سُورَةُ العَلَقِ", nomeIngles: "Al-Alaq", traducaoIngles: "The Clot", numeroAyahs: 19),
-    SurahInfo(numero: 97, nomeArabe: "سُورَةُ القَدۡرِ", nomeIngles: "Al-Qadr", traducaoIngles: "The Power, Fate", numeroAyahs: 5),
-    SurahInfo(numero: 98, nomeArabe: "سُورَةُ البَيِّنَةِ", nomeIngles: "Al-Bayyina", traducaoIngles: "The Evidence", numeroAyahs: 8),
-    SurahInfo(numero: 99, nomeArabe: "سُورَةُ الزَّلۡزَلَةِ", nomeIngles: "Az-Zalzala", traducaoIngles: "The Earthquake", numeroAyahs: 8),
-    SurahInfo(numero: 100, nomeArabe: "سُورَةُ العَادِيَاتِ", nomeIngles: "Al-Aadiyaat", traducaoIngles: "The Chargers", numeroAyahs: 11),
-    SurahInfo(numero: 101, nomeArabe: "سُورَةُ القَارِعَةِ", nomeIngles: "Al-Qaari'a", traducaoIngles: "The Calamity", numeroAyahs: 11),
-    SurahInfo(numero: 102, nomeArabe: "سُورَةُ التَّكَاثُرِ", nomeIngles: "At-Takaathur", traducaoIngles: "Competition", numeroAyahs: 8),
-    SurahInfo(numero: 103, nomeArabe: "سُورَةُ العَصۡرِ", nomeIngles: "Al-Asr", traducaoIngles: "The Declining Day, Epoch", numeroAyahs: 3),
-    SurahInfo(numero: 104, nomeArabe: "سُورَةُ الهُمَزَةِ", nomeIngles: "Al-Humaza", traducaoIngles: "The Traducer", numeroAyahs: 9),
-    SurahInfo(numero: 105, nomeArabe: "سُورَةُ الفِيلِ", nomeIngles: "Al-Fil", traducaoIngles: "The Elephant", numeroAyahs: 5),
-    SurahInfo(numero: 106, nomeArabe: "سُورَةُ قُرَيۡشٍ", nomeIngles: "Quraish", traducaoIngles: "Quraysh", numeroAyahs: 4),
-    SurahInfo(numero: 107, nomeArabe: "سُورَةُ المَاعُونِ", nomeIngles: "Al-Maa'un", traducaoIngles: "Almsgiving", numeroAyahs: 7),
-    SurahInfo(numero: 108, nomeArabe: "سُورَةُ الكَوۡثَرِ", nomeIngles: "Al-Kawthar", traducaoIngles: "Abundance", numeroAyahs: 3),
-    SurahInfo(numero: 109, nomeArabe: "سُورَةُ الكَافِرُونَ", nomeIngles: "Al-Kaafiroon", traducaoIngles: "The Disbelievers", numeroAyahs: 6),
-    SurahInfo(numero: 110, nomeArabe: "سُورَةُ النَّصۡرِ", nomeIngles: "An-Nasr", traducaoIngles: "Divine Support", numeroAyahs: 3),
-    SurahInfo(numero: 111, nomeArabe: "سُورَةُ المَسَدِ", nomeIngles: "Al-Masad", traducaoIngles: "The Palm Fibre", numeroAyahs: 5),
-    SurahInfo(numero: 112, nomeArabe: "سُورَةُ الإِخۡلَاصِ", nomeIngles: "Al-Ikhlaas", traducaoIngles: "Sincerity", numeroAyahs: 4),
-    SurahInfo(numero: 113, nomeArabe: "سُورَةُ الفَلَقِ", nomeIngles: "Al-Falaq", traducaoIngles: "The Dawn", numeroAyahs: 5),
-    SurahInfo(numero: 114, nomeArabe: "سُورَةُ النَّاسِ", nomeIngles: "An-Naas", traducaoIngles: "Mankind", numeroAyahs: 6),
+  static const List<int> _paginaImpressaSura = [
+    2, 3, 67, 106, 147, 177, 209, 246, 260, 289, 308, 327, 346, 355, 364, //
+    372, 393, 409, 425, 435, 449, 462, 477, 488, 501, 511, 525, 537, 552, //
+    562, 571, 577, 581, 595, 603, 611, 618, 628, 635, 647, 660, 668, 677, //
+    687, 691, 697, 704, 710, 716, 720, 725, 729, 733, 737, 741, 745, 750, //
+    757, 762, 767, 771, 773, 775, 777, 780, 784, 787, 790, 794, 797, 800, //
+    803, 806, 808, 811, 813, 816, 819, 821, 823, 825, 826, 827, 829, 830, //
+    832, 832, 833, 835, 836, 837, 838, 839, 840, 840, 841, 842, 842, 843, //
+    844, 844, 845, 845, 846, 846, 847, 847, 848, 848, 848, 849, 849, 849, 850,
+  ];
+
+  /// Página dentro do PDF do juz onde começa a sura [numero].
+  static int paginaDaSuraNoJuz(SurahInfo sura) {
+    final impressa = _paginaImpressaSura[sura.numero - 1];
+    return impressa - _paginaImpressaJuz[sura.juzInicial - 1] + 1;
+  }
+
+  static const List<int> surasPrincipais = [1, 36, 18, 32, 55, 56, 67];
+
+  static SurahInfo? porNumero(int numero) =>
+      (numero >= 1 && numero <= _suras.length) ? _suras[numero - 1] : null;
+
+  static const List<SurahInfo> _suras = [
+    SurahInfo(1, "Al-Faatiha", 1),
+    SurahInfo(2, "Al-Baqara", 1),
+    SurahInfo(3, "Aal-i-Imraan", 3),
+    SurahInfo(4, "An-Nisaa", 4),
+    SurahInfo(5, "Al-Maaida", 6),
+    SurahInfo(6, "Al-An'aam", 7),
+    SurahInfo(7, "Al-A'raaf", 8),
+    SurahInfo(8, "Al-Anfaal", 9),
+    SurahInfo(9, "At-Tawba", 10),
+    SurahInfo(10, "Yunus", 11),
+    SurahInfo(11, "Hud", 11),
+    SurahInfo(12, "Yusuf", 12),
+    SurahInfo(13, "Ar-Ra'd", 13),
+    SurahInfo(14, "Ibrahim", 13),
+    SurahInfo(15, "Al-Hijr", 14),
+    SurahInfo(16, "An-Nahl", 14),
+    SurahInfo(17, "Al-Israa", 15),
+    SurahInfo(18, "Al-Kahf", 15),
+    SurahInfo(19, "Maryam", 16),
+    SurahInfo(20, "Taa-Haa", 16),
+    SurahInfo(21, "Al-Anbiyaa", 17),
+    SurahInfo(22, "Al-Hajj", 17),
+    SurahInfo(23, "Al-Muminoon", 18),
+    SurahInfo(24, "An-Noor", 18),
+    SurahInfo(25, "Al-Furqaan", 18),
+    SurahInfo(26, "Ash-Shu'araa", 19),
+    SurahInfo(27, "An-Naml", 19),
+    SurahInfo(28, "Al-Qasas", 20),
+    SurahInfo(29, "Al-Ankaboot", 20),
+    SurahInfo(30, "Ar-Room", 21),
+    SurahInfo(31, "Luqman", 21),
+    SurahInfo(32, "As-Sajda", 21),
+    SurahInfo(33, "Al-Ahzaab", 21),
+    SurahInfo(34, "Saba", 22),
+    SurahInfo(35, "Faatir", 22),
+    SurahInfo(36, "Yaseen", 22),
+    SurahInfo(37, "As-Saaffaat", 23),
+    SurahInfo(38, "Saad", 23),
+    SurahInfo(39, "Az-Zumar", 23),
+    SurahInfo(40, "Ghafir", 24),
+    SurahInfo(41, "Fussilat", 24),
+    SurahInfo(42, "Ash-Shura", 25),
+    SurahInfo(43, "Az-Zukhruf", 25),
+    SurahInfo(44, "Ad-Dukhaan", 25),
+    SurahInfo(45, "Al-Jaathiya", 25),
+    SurahInfo(46, "Al-Ahqaf", 26),
+    SurahInfo(47, "Muhammad", 26),
+    SurahInfo(48, "Al-Fath", 26),
+    SurahInfo(49, "Al-Hujuraat", 26),
+    SurahInfo(50, "Qaaf", 26),
+    SurahInfo(51, "Adh-Dhaariyat", 26),
+    SurahInfo(52, "At-Tur", 27),
+    SurahInfo(53, "An-Najm", 27),
+    SurahInfo(54, "Al-Qamar", 27),
+    SurahInfo(55, "Ar-Rahmaan", 27),
+    SurahInfo(56, "Al-Waaqia", 27),
+    SurahInfo(57, "Al-Hadid", 27),
+    SurahInfo(58, "Al-Mujaadila", 28),
+    SurahInfo(59, "Al-Hashr", 28),
+    SurahInfo(60, "Al-Mumtahana", 28),
+    SurahInfo(61, "As-Saff", 28),
+    SurahInfo(62, "Al-Jumu'a", 28),
+    SurahInfo(63, "Al-Munaafiqoon", 28),
+    SurahInfo(64, "At-Taghaabun", 28),
+    SurahInfo(65, "At-Talaaq", 28),
+    SurahInfo(66, "At-Tahrim", 28),
+    SurahInfo(67, "Al-Mulk", 29),
+    SurahInfo(68, "Al-Qalam", 29),
+    SurahInfo(69, "Al-Haaqqa", 29),
+    SurahInfo(70, "Al-Ma'aarij", 29),
+    SurahInfo(71, "Nooh", 29),
+    SurahInfo(72, "Al-Jinn", 29),
+    SurahInfo(73, "Al-Muzzammil", 29),
+    SurahInfo(74, "Al-Muddaththir", 29),
+    SurahInfo(75, "Al-Qiyaama", 29),
+    SurahInfo(76, "Al-Insaan", 29),
+    SurahInfo(77, "Al-Mursalaat", 29),
+    SurahInfo(78, "An-Naba", 30),
+    SurahInfo(79, "An-Naazi'aat", 30),
+    SurahInfo(80, "Abasa", 30),
+    SurahInfo(81, "At-Takwir", 30),
+    SurahInfo(82, "Al-Infitaar", 30),
+    SurahInfo(83, "Al-Mutaffifin", 30),
+    SurahInfo(84, "Al-Inshiqaaq", 30),
+    SurahInfo(85, "Al-Burooj", 30),
+    SurahInfo(86, "At-Taariq", 30),
+    SurahInfo(87, "Al-A'laa", 30),
+    SurahInfo(88, "Al-Ghaashiya", 30),
+    SurahInfo(89, "Al-Fajr", 30),
+    SurahInfo(90, "Al-Balad", 30),
+    SurahInfo(91, "Ash-Shams", 30),
+    SurahInfo(92, "Al-Lail", 30),
+    SurahInfo(93, "Ad-Dhuhaa", 30),
+    SurahInfo(94, "Ash-Sharh", 30),
+    SurahInfo(95, "At-Tin", 30),
+    SurahInfo(96, "Al-Alaq", 30),
+    SurahInfo(97, "Al-Qadr", 30),
+    SurahInfo(98, "Al-Bayyina", 30),
+    SurahInfo(99, "Az-Zalzala", 30),
+    SurahInfo(100, "Al-Aadiyaat", 30),
+    SurahInfo(101, "Al-Qaari'a", 30),
+    SurahInfo(102, "At-Takaathur", 30),
+    SurahInfo(103, "Al-Asr", 30),
+    SurahInfo(104, "Al-Humaza", 30),
+    SurahInfo(105, "Al-Fil", 30),
+    SurahInfo(106, "Quraish", 30),
+    SurahInfo(107, "Al-Maa'un", 30),
+    SurahInfo(108, "Al-Kawthar", 30),
+    SurahInfo(109, "Al-Kaafiroon", 30),
+    SurahInfo(110, "An-Nasr", 30),
+    SurahInfo(111, "Al-Masad", 30),
+    SurahInfo(112, "Al-Ikhlaas", 30),
+    SurahInfo(113, "Al-Falaq", 30),
+    SurahInfo(114, "An-Naas", 30),
   ];
 }

@@ -49,6 +49,7 @@ class _PedidosPageState extends State<PedidosPage>
   List<Map<String, dynamic>> _aprovados = [];
   List<Map<String, dynamic>> _rejeitados = [];
   bool _carregando = true;
+  String? _erro;
 
   @override
   void initState() {
@@ -64,19 +65,32 @@ class _PedidosPageState extends State<PedidosPage>
   }
 
   Future<void> _carregar() async {
-    setState(() => _carregando = true);
-
-    final pendentes = await MesquitaRegistoService.listarPendentes();
-    final aprovados = await MesquitaRegistoService.listarAprovadas();
-    final rejeitados = await MesquitaRegistoService.listarRejeitados();
-
-    if (!mounted) return;
     setState(() {
-      _pendentes = pendentes;
-      _aprovados = aprovados;
-      _rejeitados = rejeitados;
-      _carregando = false;
+      _carregando = true;
+      _erro = null;
     });
+
+    try {
+      final pendentes = await MesquitaRegistoService.listarPendentes();
+      final aprovados = await MesquitaRegistoService.listarAprovadas();
+      final rejeitados = await MesquitaRegistoService.listarRejeitados();
+
+      if (!mounted) return;
+      setState(() {
+        _pendentes = pendentes;
+        _aprovados = aprovados;
+        _rejeitados = rejeitados;
+        _carregando = false;
+      });
+    } catch (e) {
+      // Sem isto, um erro (ex: permissão recusada pelas regras da base de
+      // dados) deixava o ecrã a carregar para sempre.
+      if (!mounted) return;
+      setState(() {
+        _carregando = false;
+        _erro = "Não foi possível carregar os pedidos.\n($e)";
+      });
+    }
   }
 
   Future<void> _aprovar(Map<String, dynamic> pedido) async {
@@ -89,7 +103,7 @@ class _PedidosPageState extends State<PedidosPage>
         content: Text(
           "Aprovar o registo de \"${mesquita['nome'] ?? ''}\"?\n\n"
           "A mesquita passará a aparecer na pesquisa e o requerente poderá "
-          "aceder ao painel de administração com as credenciais criadas no registo.",
+          "gerir a mesquita entrando com a mesma conta Google usada no registo.",
         ),
         actions: [
           TextButton(
@@ -122,6 +136,79 @@ class _PedidosPageState extends State<PedidosPage>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Erro ao aprovar: $e"), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  /// Remover é irreversível (horários, avisos, tudo) — por isso pede que
+  /// se escreva o nome da mesquita, para não acontecer por engano.
+  Future<void> _remover(Map<String, dynamic> m) async {
+    final nome = (m['nome'] ?? "").toString();
+    final confirmacaoCtrl = TextEditingController();
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setStateDialogo) {
+          final nomeCerto = confirmacaoCtrl.text.trim().toLowerCase() ==
+              nome.trim().toLowerCase();
+          return AlertDialog(
+            title: const Text("Remover mesquita"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "A \"$nome\" vai deixar de aparecer na app e todos os "
+                  "horários e avisos serão apagados. Isto não pode ser "
+                  "desfeito.\n\nPara confirmar, escreva o nome da mesquita:",
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirmacaoCtrl,
+                  autofocus: true,
+                  onChanged: (_) => setStateDialogo(() {}),
+                  decoration: InputDecoration(
+                    hintText: nome,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text("Cancelar"),
+              ),
+              ElevatedButton(
+                onPressed: nomeCerto ? () => Navigator.pop(ctx, true) : null,
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                child: const Text("Remover",
+                    style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    confirmacaoCtrl.dispose();
+    if (confirmar != true) return;
+
+    try {
+      await MesquitaRegistoService.remover(m['id']);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text("\"$nome\" foi removida"),
+            backgroundColor: Colors.orange),
+      );
+      _carregar();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text("Erro ao remover: $e"), backgroundColor: Colors.red),
       );
     }
   }
@@ -181,7 +268,8 @@ class _PedidosPageState extends State<PedidosPage>
     }
   }
 
-  Widget _cartao(Map<String, dynamic> p, {bool pendente = false}) {
+  Widget _cartao(Map<String, dynamic> p,
+      {bool pendente = false, bool aprovada = false}) {
     final requerente = Map<String, dynamic>.from(p['requerente'] ?? {});
     final localizacao = Map<String, dynamic>.from(p['localizacao'] ?? {});
     final mesquita = Map<String, dynamic>.from(p['mesquita'] ?? {});
@@ -271,6 +359,23 @@ class _PedidosPageState extends State<PedidosPage>
                 ],
               ),
             ],
+            if (aprovada) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _remover(p),
+                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  label: const Text("Remover mesquita",
+                      style: TextStyle(color: Colors.red)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.red),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -293,7 +398,8 @@ class _PedidosPageState extends State<PedidosPage>
     );
   }
 
-  Widget _lista(List<Map<String, dynamic>> lista, {bool pendente = false}) {
+  Widget _lista(List<Map<String, dynamic>> lista,
+      {bool pendente = false, bool aprovada = false}) {
     if (lista.isEmpty) {
       return Center(
         child: Column(
@@ -308,7 +414,8 @@ class _PedidosPageState extends State<PedidosPage>
     }
     return ListView.builder(
       itemCount: lista.length,
-      itemBuilder: (_, i) => _cartao(lista[i], pendente: pendente),
+      itemBuilder: (_, i) =>
+          _cartao(lista[i], pendente: pendente, aprovada: aprovada),
     );
   }
 
@@ -362,11 +469,34 @@ class _PedidosPageState extends State<PedidosPage>
       ),
       body: _carregando
           ? const Center(child: CircularProgressIndicator())
-          : TabBarView(
+          : _erro != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.error_outline,
+                            size: 48, color: Colors.black38),
+                        const SizedBox(height: 12),
+                        Text(_erro!, textAlign: TextAlign.center),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _carregar,
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF0B3D2E)),
+                          child: const Text("Tentar novamente",
+                              style: TextStyle(color: Colors.white)),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : TabBarView(
               controller: _tabController,
               children: [
                 _lista(_pendentes, pendente: true),
-                _lista(_aprovados),
+                _lista(_aprovados, aprovada: true),
                 _lista(_rejeitados),
               ],
             ),

@@ -1,49 +1,21 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:pdfx/pdfx.dart';
+import '../services/local_storage_service.dart';
 import '../services/quran_service.dart';
-import '../services/indopak_mushaf_service.dart';
 import 'quran_marcadores_page.dart';
+import 'quran_pt_page.dart';
 
-const List<String> _numeraisArabes = [
-  "٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩",
-];
+const Color _verde = Color(0xFF0B3D2E);
+const Color _dourado = Color(0xFFD4AF37);
+const Color _verdeClaro = Color(0xFFE6F2ED);
 
-String _numeralArabe(int n) =>
-    n.toString().split('').map((d) => _numeraisArabes[int.parse(d)]).join();
+enum _Idioma { arabe, portugues }
 
-// Marca de fim de versículo tradicional do Alcorão (U+06DD) + número
-// em algarismos arábicos, como num Mushaf impresso.
-String _marcadorAyah(int numero) => "۝${_numeralArabe(numero)}";
+enum _ListaArabe { suras, juz }
 
-const String _fonteMushaf = "IndopakNastaleeq";
-
-const TextStyle _estiloTextoAyah = TextStyle(
-  fontSize: 26,
-  color: Colors.black87,
-  fontFamily: _fonteMushaf,
-);
-
-const TextStyle _estiloMarcadorAyah = TextStyle(
-  fontSize: 22,
-  color: Color(0xFFB8860B),
-  fontWeight: FontWeight.bold,
-  fontFamily: _fonteMushaf,
-);
-
-const TextStyle _estiloCabecalhoSura = TextStyle(
-  fontSize: 22,
-  fontWeight: FontWeight.bold,
-  color: Color(0xFF0B3D2E),
-);
-
-const TextStyle _estiloBasmallah = TextStyle(
-  fontSize: 24,
-  color: Color(0xFF0B3D2E),
-  fontFamily: _fonteMushaf,
-);
-
-/// Lista de suras — vive dentro do PageView principal (sem AppBar
-/// própria). Ao tocar numa sura, abre [SurahPage] via Navigator.
+/// Alcorão — Mushaf árabe (13 linhas, PDF por juz) e tradução em
+/// português, no mesmo ecrã com um seletor no topo. Vive dentro do
+/// separador "Islâmico" (sem AppBar própria).
 class QuranPage extends StatefulWidget {
   const QuranPage({super.key});
 
@@ -52,11 +24,15 @@ class QuranPage extends StatefulWidget {
 }
 
 class _QuranPageState extends State<QuranPage> {
-  final List<SurahInfo> _suras = QuranService.listarSurahs();
   final TextEditingController _pesquisaController = TextEditingController();
 
-  Map<String, dynamic>? _ultimaLeitura;
+  _Idioma _idioma = _Idioma.arabe;
+  _ListaArabe _listaArabe = _ListaArabe.suras;
   String _pesquisa = "";
+
+  Map<String, dynamic>? _ultimaLeitura;
+  int? _ultimaPaginaPt;
+  Set<int> _descarregados = {};
 
   @override
   void initState() {
@@ -65,102 +41,386 @@ class _QuranPageState extends State<QuranPage> {
     _pesquisaController.addListener(() {
       setState(() => _pesquisa = _pesquisaController.text.trim());
     });
+    // Actualiza os ícones de "offline" à medida que o "Descarregar tudo"
+    // avança de juz em juz.
+    QuranService.downloadTudoJuz.addListener(_verificarEstado);
   }
 
   @override
   void dispose() {
+    QuranService.downloadTudoJuz.removeListener(_verificarEstado);
     _pesquisaController.dispose();
     super.dispose();
   }
 
   Future<void> _verificarEstado() async {
-    final ultimaLeitura = await QuranService.obterUltimaLeitura();
+    final ultimaArabe = await QuranService.obterUltimaLeitura();
+    final ultimaPt = await LocalStorageService.carregarUltimaPaginaQuranPt();
+    final descarregados = await QuranService.juzesDescarregados();
     if (!mounted) return;
     setState(() {
-      _ultimaLeitura = ultimaLeitura;
+      _ultimaLeitura = ultimaArabe;
+      _ultimaPaginaPt = ultimaPt;
+      _descarregados = descarregados;
     });
   }
 
-  void _abrirSurah(SurahInfo sura, {int? ayahInicial}) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => SurahPage(sura: sura, ayahInicial: ayahInicial),
+  void _abrir(Widget pagina) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => pagina))
+        .then((_) => _verificarEstado());
+  }
+
+  void _abrirJuz(int juz, {int pagina = 1}) =>
+      _abrir(JuzReaderPage(juz: juz, paginaInicial: pagina));
+
+  void _abrirSura(SurahInfo sura) {
+    if (_idioma == _Idioma.arabe) {
+      _abrirJuz(sura.juzInicial, pagina: QuranService.paginaDaSuraNoJuz(sura));
+    } else {
+      _abrir(QuranPtReaderPage(paginaInicial: paginaPtDaSura(sura.numero)));
+    }
+  }
+
+  Future<void> _descarregarTudo() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Descarregar todo o Alcorão?"),
+        content: Text(
+          "Vão ser descarregados os "
+          "${QuranService.totalJuz - _descarregados.length} juz em falta "
+          "(até ~42 MB). Recomenda-se usar Wi-Fi.\n\n"
+          "Depois disso, o Alcorão fica disponível sem internet.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancelar"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Descarregar"),
+          ),
+        ],
       ),
-    ).then((_) => _verificarEstado());
+    );
+    if (confirmar != true) return;
+
+    final falhas = await QuranService.descarregarTudo();
+    if (!mounted) return;
+    final completo = (await QuranService.juzesDescarregados()).length ==
+        QuranService.totalJuz;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(completo
+          ? "Alcorão completo descarregado ✅"
+          : falhas > 0
+              ? "$falhas juz não foram descarregados. Verifique a ligação e tente de novo."
+              : "Download interrompido."),
+    ));
+  }
+
+  Future<void> _confirmarApagar(int juz) async {
+    final apagar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("Apagar Juz $juz?"),
+        content: const Text(
+            "O ficheiro será removido do telemóvel. Pode voltar a descarregá-lo quando quiser."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancelar"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Apagar", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (apagar != true) return;
+    await QuranService.apagarJuz(juz);
+    _verificarEstado();
   }
 
   List<SurahInfo> get _surasFiltradas {
-    if (_pesquisa.isEmpty) return _suras;
     final termo = _pesquisa.toLowerCase();
-    return _suras.where((s) {
-      return s.numero.toString() == termo ||
-          s.nomeIngles.toLowerCase().contains(termo) ||
-          s.traducaoIngles.toLowerCase().contains(termo) ||
-          s.nomeArabe.contains(_pesquisa);
+    return QuranService.listarSurahs().where((s) {
+      return termo.isEmpty ||
+          s.numero.toString() == termo ||
+          s.nome.toLowerCase().contains(termo);
     }).toList();
   }
 
+  bool get _mostrarJuz =>
+      _idioma == _Idioma.arabe &&
+      _listaArabe == _ListaArabe.juz &&
+      _pesquisa.isEmpty;
+
   @override
   Widget build(BuildContext context) {
-    final surasFiltradas = _surasFiltradas;
-
     return Container(
       color: const Color(0xFFF4F1EA),
       child: CustomScrollView(
         slivers: [
-          SliverToBoxAdapter(child: _cabecalho()),
-          if (surasFiltradas.isEmpty)
-            const SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(
-                  child: Text(
-                    "Nenhuma sura encontrada.",
-                    style: TextStyle(color: Colors.black54),
-                  ),
-                ),
-              ),
-            )
-          else
-            SliverList.separated(
-              itemCount: surasFiltradas.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final sura = surasFiltradas[index];
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: const Color(0xFF0B3D2E),
-                    foregroundColor: Colors.white,
-                    child: Text("${sura.numero}"),
-                  ),
-                  title: Text(
-                    sura.nomeIngles,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text(
-                    "${sura.traducaoIngles} · ${sura.numeroAyahs} versículos",
-                  ),
-                  trailing: Text(
-                    sura.nomeArabe,
-                    style: const TextStyle(fontSize: 18),
-                    textDirection: TextDirection.rtl,
-                  ),
-                  onTap: () => _abrirSurah(sura),
-                );
-              },
-            ),
+          SliverToBoxAdapter(child: _topo()),
+          if (_mostrarJuz) _listaJuz() else _listaSuras(),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
         ],
       ),
     );
   }
 
+  // ---------------- Topo ----------------
+
+  Widget _topo() {
+    final arabe = _idioma == _Idioma.arabe;
+    final continuar = _cardContinuar();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _seletorIdioma(),
+          const SizedBox(height: 14),
+          if (continuar != null) ...[
+            continuar,
+            const SizedBox(height: 12),
+          ],
+          if (arabe) ...[
+            _accoesArabe(),
+            _progressoDownloadTudo(),
+            const SizedBox(height: 12),
+          ],
+          _campoPesquisa(),
+          if (arabe && _pesquisa.isEmpty) ...[
+            const SizedBox(height: 12),
+            _seletorListaArabe(),
+          ],
+          if (!arabe) ...[
+            const SizedBox(height: 8),
+            const Text(
+              "Tradução do significado dos versículos",
+              style: TextStyle(color: Colors.black54, fontSize: 12),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _seletorIdioma() {
+    Widget opcao(_Idioma idioma, String texto) {
+      final ativo = _idioma == idioma;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _idioma = idioma),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: ativo ? _verde : Colors.transparent,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Text(
+              texto,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: ativo ? Colors.white : _verde,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: _verde.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          opcao(_Idioma.arabe, "Árabe"),
+          opcao(_Idioma.portugues, "Português"),
+        ],
+      ),
+    );
+  }
+
+  Widget? _cardContinuar() {
+    String? detalhe;
+    VoidCallback? abrir;
+
+    final ultima = _ultimaLeitura;
+    final ultimaPt = _ultimaPaginaPt;
+    if (_idioma == _Idioma.arabe && ultima != null) {
+      final juz = ultima["juz"] as int;
+      final pagina = ultima["pagina"] as int;
+      detalhe = "Juz $juz · página $pagina";
+      abrir = () => _abrirJuz(juz, pagina: pagina);
+    } else if (_idioma == _Idioma.portugues && ultimaPt != null) {
+      detalhe = "Página $ultimaPt";
+      abrir = () => _abrir(QuranPtReaderPage(paginaInicial: ultimaPt));
+    }
+    if (detalhe == null) return null;
+
+    return Material(
+      color: _verde,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: abrir,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              const Icon(Icons.menu_book, color: _dourado),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Continuar leitura",
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    Text(
+                      detalhe,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Colors.white),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _accoesArabe() {
+    final completo = _descarregados.length == QuranService.totalJuz;
+    return Row(
+      children: [
+        Expanded(
+          child: _botaoAccao(
+            icone: Icons.bookmark_outline,
+            texto: "Marcadores",
+            onTap: () => _abrir(const QuranMarcadoresPage()),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _botaoAccao(
+            icone: completo ? Icons.offline_pin : Icons.download_outlined,
+            texto: completo
+                ? "Offline completo"
+                : "Offline ${_descarregados.length}/${QuranService.totalJuz}",
+            onTap: completo || QuranService.aDescarregarTudo
+                ? null
+                : _descarregarTudo,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _botaoAccao({
+    required IconData icone,
+    required String texto,
+    VoidCallback? onTap,
+  }) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 11),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _verde.withValues(alpha: 0.25)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icone, size: 18, color: _verde),
+              const SizedBox(width: 6),
+              Text(
+                texto,
+                style: const TextStyle(
+                  color: _verde,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _progressoDownloadTudo() {
+    return ValueListenableBuilder<int?>(
+      valueListenable: QuranService.downloadTudoJuz,
+      builder: (context, juzAtual, _) {
+        if (juzAtual == null) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: ValueListenableBuilder<double>(
+                  valueListenable: QuranService.downloadTudoProgresso,
+                  builder: (context, progresso, _) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "A descarregar Juz $juzAtual de ${QuranService.totalJuz} · ${(progresso * 100).round()}%",
+                        style: const TextStyle(fontSize: 12, color: _verde),
+                      ),
+                      const SizedBox(height: 4),
+                      LinearProgressIndicator(
+                        value: progresso,
+                        color: _verde,
+                        backgroundColor: _verdeClaro,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: QuranService.cancelarDownloadTudo,
+                child: const Text("Parar"),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _campoPesquisa() {
+    final borda = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(30),
+      borderSide: BorderSide(color: _verde.withValues(alpha: 0.25)),
+    );
     return TextField(
       controller: _pesquisaController,
       decoration: InputDecoration(
-        hintText: "Pesquisar sura (nome, tema, número...)",
-        prefixIcon: const Icon(Icons.search, color: Color(0xFF0B3D2E)),
+        hintText: "Pesquisar sura (nome ou número)",
+        prefixIcon: const Icon(Icons.search, color: _verde),
         suffixIcon: _pesquisa.isEmpty
             ? null
             : IconButton(
@@ -169,574 +429,359 @@ class _QuranPageState extends State<QuranPage> {
               ),
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(vertical: 0),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(30),
-          borderSide: const BorderSide(color: Color(0xFF0B3D2E)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(30),
-          borderSide: const BorderSide(color: Color(0xFF0B3D2E)),
-        ),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        border: borda,
+        enabledBorder: borda,
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(30),
-          borderSide: const BorderSide(color: Color(0xFFD4AF37), width: 2),
+          borderSide: const BorderSide(color: _dourado, width: 2),
         ),
       ),
     );
   }
 
-  Widget _cabecalho() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const QuranMarcadoresPage(),
-                    ),
-                  ),
-                  icon: const Icon(Icons.bookmark, color: Color(0xFF0B3D2E)),
-                  label: const Text(
-                    "Marcadores",
-                    style: TextStyle(color: Color(0xFF0B3D2E)),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Color(0xFF0B3D2E)),
-                  ),
-                ),
-              ),
-            ],
+  Widget _seletorListaArabe() {
+    Widget chip(_ListaArabe lista, String texto) {
+      final ativo = _listaArabe == lista;
+      return ChoiceChip(
+        label: Text(texto),
+        selected: ativo,
+        onSelected: (_) => setState(() => _listaArabe = lista),
+        selectedColor: _verde,
+        backgroundColor: Colors.white,
+        showCheckmark: false,
+        side: BorderSide(color: _verde.withValues(alpha: 0.25)),
+        labelStyle: TextStyle(
+          color: ativo ? Colors.white : _verde,
+          fontWeight: FontWeight.w600,
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        chip(_ListaArabe.suras, "Suras"),
+        const SizedBox(width: 8),
+        chip(_ListaArabe.juz, "Juz"),
+      ],
+    );
+  }
+
+  // ---------------- Listas ----------------
+
+  Widget _listaSuras() {
+    final suras = _surasFiltradas;
+    if (suras.isEmpty) {
+      return const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Center(
+            child: Text(
+              "Nenhuma sura encontrada.",
+              style: TextStyle(color: Colors.black54),
+            ),
           ),
-          if (_ultimaLeitura != null) ...[
-            const SizedBox(height: 12),
-            _cardContinuarLeitura(),
-          ],
-          const SizedBox(height: 20),
-          _campoPesquisa(),
-          if (_pesquisa.isEmpty) ...[
-            const SizedBox(height: 20),
-            const Text(
-              "Suras principais",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 10),
-            _listaSurasPrincipais(),
-          ],
-          const SizedBox(height: 20),
-          Text(
-            _pesquisa.isEmpty ? "Todas as suras" : "Resultados",
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+      );
+    }
+
+    final arabe = _idioma == _Idioma.arabe;
+    return SliverList.separated(
+      itemCount: suras.length,
+      separatorBuilder: (_, __) =>
+          const Divider(height: 1, indent: 72, endIndent: 16),
+      itemBuilder: (context, index) {
+        final sura = suras[index];
+        final subtitulo = arabe
+            ? "Juz ${sura.juzInicial} · página ${QuranService.paginaDaSuraNoJuz(sura)}"
+            : "Página ${paginaPtDaSura(sura.numero)}";
+        final offline = arabe && _descarregados.contains(sura.juzInicial);
+        return ListTile(
+          leading: _numero(sura.numero),
+          title: Text(
+            sura.nome,
+            style: const TextStyle(fontWeight: FontWeight.w600),
           ),
-        ],
-      ),
+          subtitle: Text(subtitulo),
+          trailing: offline
+              ? const Icon(Icons.offline_pin, size: 18, color: _verde)
+              : const Icon(Icons.chevron_right),
+          onTap: () => _abrirSura(sura),
+        );
+      },
     );
   }
 
-  Widget _cardContinuarLeitura() {
-    final surahNum = _ultimaLeitura!["surah"] as int;
-    final ayah = _ultimaLeitura!["ayah"] as int;
-    final sura = QuranService.porNumero(surahNum);
-    if (sura == null) return const SizedBox();
-
-    return GestureDetector(
-      onTap: () => _abrirSurah(sura, ayahInicial: ayah),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0B3D2E),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.play_circle_fill, color: Color(0xFFD4AF37)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "Continuar leitura",
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  Text(
-                    "${sura.nomeIngles} · versículo $ayah",
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Colors.white),
-          ],
-        ),
-      ),
+  Widget _listaJuz() {
+    return SliverList.separated(
+      itemCount: QuranService.totalJuz,
+      separatorBuilder: (_, __) =>
+          const Divider(height: 1, indent: 72, endIndent: 16),
+      itemBuilder: (context, index) {
+        final juz = index + 1;
+        final descarregado = _descarregados.contains(juz);
+        return ListTile(
+          leading: _numero(juz),
+          title: Text(
+            "Juz $juz",
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          subtitle: Text(descarregado
+              ? "Disponível offline · toque longo para apagar"
+              : "Toque para descarregar (~1,5 MB)"),
+          trailing: Icon(
+            descarregado ? Icons.offline_pin : Icons.download_outlined,
+            size: 20,
+            color: descarregado ? _verde : Colors.black38,
+          ),
+          onTap: () => _abrirJuz(juz),
+          onLongPress: descarregado ? () => _confirmarApagar(juz) : null,
+        );
+      },
     );
   }
 
-  Widget _listaSurasPrincipais() {
-    return SizedBox(
-      height: 64,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: QuranService.suasPrincipais.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (context, index) {
-          final sura = QuranService.porNumero(QuranService.suasPrincipais[index]);
-          if (sura == null) return const SizedBox();
-          return GestureDetector(
-            onTap: () => _abrirSurah(sura),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE6F2ED),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF0B3D2E)),
-              ),
-              child: Text(
-                sura.nomeIngles,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF0B3D2E),
-                ),
-              ),
-            ),
-          );
-        },
+  Widget _numero(int n) {
+    return Container(
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: _verdeClaro,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        "$n",
+        style: const TextStyle(color: _verde, fontWeight: FontWeight.bold),
       ),
     );
   }
 }
 
-class SurahPage extends StatefulWidget {
-  final SurahInfo sura;
-  final int? ayahInicial;
+/// Leitor de um juz em PDF. Se o ficheiro ainda não existir no
+/// telemóvel, descarrega-o primeiro (com barra de progresso).
+class JuzReaderPage extends StatefulWidget {
+  final int juz;
+  final int paginaInicial;
 
-  const SurahPage({super.key, required this.sura, this.ayahInicial});
+  const JuzReaderPage({
+    super.key,
+    required this.juz,
+    this.paginaInicial = 1,
+  });
 
   @override
-  State<SurahPage> createState() => _SurahPageState();
+  State<JuzReaderPage> createState() => _JuzReaderPageState();
 }
 
-class _SurahPageState extends State<SurahPage> {
-  late Future<List<List<MushafLinha>>> _futurePaginas;
-  final Map<int, TapGestureRecognizer> _recognizers = {};
-
-  late PageController _pageController;
-  int _paginaAtual = 0;
-  bool _jaSaltou = false;
-  List<int>? _surahInicialPorPagina;
-  List<int>? _juzInicialPorPagina;
+class _JuzReaderPageState extends State<JuzReaderPage> {
+  PdfController? _controller;
+  double? _progresso;
+  String? _erro;
+  int _paginaAtual = 1;
+  int? _totalPaginas;
 
   @override
   void initState() {
     super.initState();
-    _futurePaginas = IndopakMushafService.obterPaginas();
-    _pageController = PageController();
+    _paginaAtual = widget.paginaInicial;
+    _preparar();
   }
 
   @override
   void dispose() {
-    for (final r in _recognizers.values) {
-      r.dispose();
-    }
-    _pageController.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
-  TapGestureRecognizer _recognizerPara(MushafWord palavra, int surahAtual) {
-    final chave = surahAtual * 1000 + palavra.ayah;
-    return _recognizers.putIfAbsent(
-      chave,
-      () => TapGestureRecognizer()
-        ..onTap = () => _abrirDialogoMarcador(surahAtual, palavra.ayah),
-    );
-  }
-
-  void _saltarParaAlvoSeNecessario(List<List<MushafLinha>> paginas) {
-    if (_jaSaltou) return;
-    _jaSaltou = true;
-
-    final indice = IndopakMushafService.paginaParaAyah(
-      paginas,
-      widget.sura.numero,
-      widget.ayahInicial ?? 1,
-    );
-    if (indice == null || indice <= 0) return;
-
-    _paginaAtual = indice;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_pageController.hasClients) {
-        _pageController.jumpToPage(indice);
-      }
+  Future<void> _preparar() async {
+    // Só é chamado de novo a partir do ecrã de erro, quando o PdfView já
+    // não está montado — por isso é seguro descartar o controlador aqui.
+    _controller?.dispose();
+    _controller = null;
+    setState(() {
+      _erro = null;
+      _progresso = null;
     });
+
+    try {
+      var ficheiro = await QuranService.ficheiroJuz(widget.juz);
+      if (!await ficheiro.exists()) {
+        setState(() => _progresso = 0);
+        ficheiro = await QuranService.descarregarJuz(
+          widget.juz,
+          onProgresso: (p) {
+            if (mounted) setState(() => _progresso = p);
+          },
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _progresso = null;
+        _controller = PdfController(
+          document: PdfDocument.openFile(ficheiro.path),
+          initialPage: widget.paginaInicial,
+        );
+      });
+      QuranService.registarUltimaLeitura(widget.juz, _paginaAtual);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _progresso = null;
+        _erro = "Não foi possível descarregar o Juz ${widget.juz}.\n"
+            "Verifique a sua ligação à internet e tente novamente.";
+      });
+    }
   }
 
-  Future<void> _abrirDialogoMarcador(int surah, int ayah) async {
-    final sura = QuranService.porNumero(surah);
-    final controller = TextEditingController(
-      text: sura != null ? "${sura.nomeIngles} $ayah" : "Marcador",
+  Future<void> _adicionarMarcador() async {
+    final nomeController = TextEditingController(
+      text: "Juz ${widget.juz} · página $_paginaAtual",
     );
-
     final nome = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text("Novo marcador"),
+      builder: (ctx) => AlertDialog(
+        title: const Text("Guardar marcador"),
         content: TextField(
-          controller: controller,
+          controller: nomeController,
           autofocus: true,
           decoration: const InputDecoration(labelText: "Nome do marcador"),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
+            onPressed: () => Navigator.pop(ctx),
             child: const Text("Cancelar"),
           ),
-          ElevatedButton(
-            onPressed: () =>
-                Navigator.pop(dialogContext, controller.text.trim()),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0B3D2E),
-              foregroundColor: Colors.white,
-            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, nomeController.text.trim()),
             child: const Text("Guardar"),
           ),
         ],
       ),
     );
+    nomeController.dispose();
+    if (nome == null) return;
 
-    if (nome == null || nome.isEmpty) return;
-
-    await QuranService.salvarMarcador(
-      QuranMarcador(
-        nome: nome,
-        surah: surah,
-        ayah: ayah,
-        surahNome: sura?.nomeIngles ?? "",
-        criadoEm: DateTime.now(),
-      ),
-    );
-    await QuranService.registarUltimaLeitura(surah, ayah);
-
+    await QuranService.salvarMarcador(QuranMarcador(
+      nome: nome.isEmpty ? "Juz ${widget.juz} · página $_paginaAtual" : nome,
+      juz: widget.juz,
+      pagina: _paginaAtual,
+      criadoEm: DateTime.now(),
+    ));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Marcador "$nome" guardado'),
-        backgroundColor: const Color(0xFF0B3D2E),
-      ),
+      const SnackBar(content: Text("Marcador guardado")),
     );
-  }
-
-  void _novoMarcadorPaginaAtual(List<List<MushafLinha>> paginas) {
-    final alvo = IndopakMushafService.primeiroAyahDaPagina(
-      paginas,
-      _paginaAtual,
-    );
-    if (alvo == null) return;
-    _abrirDialogoMarcador(alvo.$1, alvo.$2);
   }
 
   @override
   Widget build(BuildContext context) {
+    final total = _totalPaginas;
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F1EA),
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0B3D2E),
+        backgroundColor: _verde,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text("Alcorão", style: TextStyle(color: Colors.white)),
+        title: Text(
+          total == null
+              ? "Juz ${widget.juz}"
+              : "Juz ${widget.juz} · $_paginaAtual/$total",
+          style: const TextStyle(color: Colors.white),
+        ),
         actions: [
-          FutureBuilder<List<List<MushafLinha>>>(
-            future: _futurePaginas,
-            builder: (context, snapshot) {
-              return IconButton(
-                icon: const Icon(Icons.bookmark_add, color: Colors.white),
-                tooltip: "Novo marcador",
-                onPressed: snapshot.hasData
-                    ? () => _novoMarcadorPaginaAtual(snapshot.data!)
-                    : null,
-              );
-            },
-          ),
-        ],
-      ),
-      body: FutureBuilder<List<List<MushafLinha>>>(
-        future: _futurePaginas,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(color: Color(0xFF0B3D2E)),
-            );
-          }
-
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error_outline, size: 48, color: Colors.grey),
-                    const SizedBox(height: 16),
-                    const Text(
-                      "Não foi possível carregar o Alcorão.",
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () => setState(() {
-                        _futurePaginas = IndopakMushafService.obterPaginas();
-                      }),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0B3D2E),
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text("Tentar novamente"),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          final paginas = snapshot.data!;
-          _saltarParaAlvoSeNecessario(paginas);
-          _surahInicialPorPagina ??=
-              IndopakMushafService.surahInicialPorPagina(paginas);
-          _juzInicialPorPagina ??=
-              IndopakMushafService.juzInicialPorPagina(paginas);
-
-          return Column(
-            children: [
-              Expanded(
-                child: PageView.builder(
-                  controller: _pageController,
-                  reverse: true, // páginas do Alcorão avançam da direita para a esquerda
-                  itemCount: paginas.length,
-                  onPageChanged: (i) => setState(() => _paginaAtual = i),
-                  itemBuilder: (context, index) {
-                    final juzDaPagina = _juzInicialPorPagina![index];
-                    final juzAnterior =
-                        index == 0 ? null : _juzInicialPorPagina![index - 1];
-                    final juzNovo = juzDaPagina != juzAnterior ? juzDaPagina : null;
-                    return _paginaWidget(
-                      paginas[index],
-                      _surahInicialPorPagina![index],
-                      MediaQuery.of(context).size.width - 32,
-                      juzNovo: juzNovo,
-                    );
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Builder(
-                  builder: (context) {
-                    final suraAtual = QuranService.porNumero(
-                        _surahInicialPorPagina![_paginaAtual]);
-                    final juzAtual = _juzInicialPorPagina![_paginaAtual];
-                    final prefixo = suraAtual != null
-                        ? "${suraAtual.nomeIngles} — "
-                        : "";
-                    return Text(
-                      "${prefixo}Juz $juzAtual — Página ${_paginaAtual + 1} de ${paginas.length}",
-                      style: const TextStyle(color: Colors.black54, fontSize: 12),
-                    );
-                  },
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  // Mede a largura natural (numa só linha) que uma linha de versículos
-  // ocuparia no tamanho de letra base — para depois calcular UMA
-  // escala só, aplicada a todas as linhas da página por igual.
-  double _medirLarguraLinha(LinhaAyah linha) {
-    final spans = <InlineSpan>[];
-    for (final p in linha.palavras) {
-      spans.add(TextSpan(text: "${p.texto} ", style: _estiloTextoAyah));
-      if (p.fimDeAyah) {
-        spans.add(TextSpan(
-          text: " ${_marcadorAyah(p.ayah)} ",
-          style: _estiloMarcadorAyah,
-        ));
-      }
-    }
-    final tp = TextPainter(
-      text: TextSpan(children: spans),
-      textDirection: TextDirection.rtl,
-      maxLines: 1,
-    )..layout();
-    final largura = tp.width;
-    tp.dispose();
-    return largura;
-  }
-
-  Widget _paginaWidget(
-    List<MushafLinha> pagina,
-    int surahInicial,
-    double larguraDisponivel, {
-    int? juzNovo,
-  }) {
-    // Segue o número da sura ao longo da página, para os
-    // reconhecedores de toque saberem a que sura cada versículo
-    // pertence (os dados de layout só indicam a sura no título, que
-    // pode mudar a meio da página se houver suras curtas).
-    int surahAtual = surahInicial;
-
-    // Uma única escala para a página inteira — baseada na linha mais
-    // larga — em vez de cada linha escalar de forma independente
-    // (o que fazia o tamanho de letra variar de linha para linha).
-    double maiorLargura = 0;
-    for (final linha in pagina) {
-      if (linha is LinhaAyah) {
-        final largura = _medirLarguraLinha(linha);
-        if (largura > maiorLargura) maiorLargura = largura;
-      }
-    }
-    final escala = maiorLargura > larguraDisponivel
-        ? (larguraDisponivel / maiorLargura).clamp(0.4, 1.0)
-        : 1.0;
-
-    final estiloTexto =
-        _estiloTextoAyah.copyWith(fontSize: _estiloTextoAyah.fontSize! * escala);
-    final estiloMarcador = _estiloMarcadorAyah.copyWith(
-        fontSize: _estiloMarcadorAyah.fontSize! * escala);
-    final estiloCabecalho = _estiloCabecalhoSura.copyWith(
-        fontSize: _estiloCabecalhoSura.fontSize! * escala);
-    final estiloBasmallahEscalado =
-        _estiloBasmallah.copyWith(fontSize: _estiloBasmallah.fontSize! * escala);
-
-    final linhasWidgets = <Widget>[];
-    final linhasEhTitulo = <bool>[];
-    for (final linha in pagina) {
-      if (linha is LinhaTituloSura) {
-        surahAtual = linha.surah;
-        final sura = QuranService.porNumero(linha.surah);
-        linhasWidgets
-            .add(_linhaCabecalho(sura?.nomeArabe ?? "", estiloCabecalho));
-        linhasEhTitulo.add(true);
-      } else if (linha is LinhaBasmallah) {
-        linhasWidgets.add(_linhaBasmallah(estiloBasmallahEscalado));
-        linhasEhTitulo.add(false);
-      } else if (linha is LinhaAyah) {
-        linhasWidgets.add(
-          _linhaAyahWidget(linha, surahAtual, estiloTexto, estiloMarcador),
-        );
-        linhasEhTitulo.add(false);
-      }
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Column(
-        children: [
-          if (juzNovo != null) _bannerJuz(juzNovo),
-          for (var i = 0; i < linhasWidgets.length; i++)
-            Expanded(
-              child: linhasEhTitulo[i]
-                  ? Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.symmetric(vertical: 3),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFF8E1),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: const Color(0xFFD4AF37),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: linhasWidgets[i],
-                    )
-                  : Container(
-                      width: double.infinity,
-                      decoration: const BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(color: Color(0xFFDCD2B0), width: 1),
-                        ),
-                      ),
-                      child: linhasWidgets[i],
-                    ),
+          if (_controller != null)
+            IconButton(
+              icon: const Icon(Icons.bookmark_add_outlined),
+              tooltip: "Guardar marcador",
+              onPressed: _adicionarMarcador,
             ),
         ],
       ),
+      body: _corpo(),
     );
   }
 
-  Widget _bannerJuz(int juz) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Center(
-        child: Text(
-          "Juz $juz",
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 13,
-            letterSpacing: 1,
+  Widget _corpo() {
+    if (_erro != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.wifi_off, size: 48, color: Colors.black38),
+              const SizedBox(height: 12),
+              Text(_erro!, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _preparar,
+                style: ElevatedButton.styleFrom(backgroundColor: _verde),
+                child: const Text(
+                  "Tentar novamente",
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
           ),
         ),
-      ),
-    );
-  }
+      );
+    }
 
-  Widget _linhaCabecalho(String nomeArabe, TextStyle estilo) {
-    return Center(
-      child: Text(nomeArabe, textDirection: TextDirection.rtl, style: estilo),
-    );
-  }
-
-  Widget _linhaBasmallah(TextStyle estilo) {
-    return Center(
-      child: Text(
-        IndopakMushafService.basmallah,
-        textDirection: TextDirection.rtl,
-        style: estilo,
-      ),
-    );
-  }
-
-  Widget _linhaAyahWidget(
-    LinhaAyah linha,
-    int surahAtual,
-    TextStyle estiloTexto,
-    TextStyle estiloMarcador,
-  ) {
-    return Center(
-      child: Text.rich(
-        TextSpan(
-          children: [
-            for (final p in linha.palavras) ...[
-              TextSpan(text: "${p.texto} ", style: estiloTexto),
-              if (p.fimDeAyah)
-                TextSpan(
-                  text: " ${_marcadorAyah(p.ayah)} ",
-                  style: estiloMarcador,
-                  recognizer: _recognizerPara(p, surahAtual),
-                ),
+    if (_progresso != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("A descarregar o Juz ${widget.juz}…"),
+              const SizedBox(height: 16),
+              LinearProgressIndicator(
+                value: _progresso! > 0 ? _progresso : null,
+                color: _verde,
+                backgroundColor: const Color(0xFFE6F2ED),
+              ),
+              const SizedBox(height: 8),
+              Text("${(_progresso! * 100).round()}%"),
             ],
-          ],
+          ),
         ),
-        textDirection: TextDirection.rtl,
-      ),
+      );
+    }
+
+    final controller = _controller;
+    if (controller == null) {
+      return const Center(child: CircularProgressIndicator(color: _verde));
+    }
+
+    // reverse: o Mushaf lê-se da direita para a esquerda — a página
+    // seguinte fica à esquerda, como num livro árabe.
+    return PdfView(
+      controller: controller,
+      reverse: true,
+      backgroundDecoration: const BoxDecoration(color: Colors.white),
+      onDocumentLoaded: (doc) {
+        setState(() => _totalPaginas = doc.pagesCount);
+        // Um marcador antigo pode apontar para além do fim do PDF.
+        if (widget.paginaInicial > doc.pagesCount) {
+          controller.jumpToPage(1);
+        }
+      },
+      onDocumentError: (_) async {
+        // PDF corrompido: apaga-o para que "Tentar novamente" o volte a
+        // descarregar do zero.
+        await QuranService.apagarJuz(widget.juz);
+        if (!mounted) return;
+        setState(() {
+          _erro = "O ficheiro do Juz ${widget.juz} está danificado.\n"
+              "Toque em \"Tentar novamente\" para o descarregar outra vez.";
+        });
+      },
+      onPageChanged: (pagina) {
+        setState(() => _paginaAtual = pagina);
+        QuranService.registarUltimaLeitura(widget.juz, pagina);
+      },
     );
   }
 }

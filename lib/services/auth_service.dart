@@ -1,38 +1,52 @@
-import 'package:firebase_database/firebase_database.dart';
-import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+/// Login por PIN (admin de uma mesquita / super-admin).
+///
+/// O PIN é verificado no servidor pela Cloud Function `loginComPin` — a
+/// app nunca vê o PIN correcto. Se estiver certo, a função dá à sessão
+/// um custom claim ("mesquita" ou "superAdmin") que as regras da base de
+/// dados exigem para escrever.
 class AuthService {
-  static Future<bool> login(String pinDigitado) {
-    return _loginComPin("app/admin_pin", pinDigitado);
+  static Future<bool> login(String pinDigitado, {required String mesquitaId}) {
+    return _loginComPin(pinDigitado, tipo: "admin", mesquitaId: mesquitaId);
   }
 
   static Future<bool> loginSuperAdmin(String pinDigitado) {
-    return _loginComPin("app/super_admin_pin", pinDigitado);
+    return _loginComPin(pinDigitado, tipo: "superAdmin");
   }
 
-  static Future<bool> _loginComPin(String caminhoPin, String pinDigitado) async {
+  static Future<bool> _loginComPin(
+    String pinDigitado, {
+    required String tipo,
+    String? mesquitaId,
+  }) async {
     try {
-      // 1️⃣ Buscar PIN do Firebase
-      final ref = FirebaseDatabase.instanceFor(
-        app: Firebase.app(),
-        databaseURL:
-            'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/',
-      ).ref(caminhoPin);
+      final auth = FirebaseAuth.instance;
+      // A função precisa de saber quem receber o claim — uma sessão
+      // anónima chega (ou a sessão Google, se já houver uma).
+      if (auth.currentUser == null) {
+        await auth.signInAnonymously();
+      }
 
-      final snapshot = await ref.get();
+      final resultado = await FirebaseFunctions.instanceFor(
+        region: "europe-west1",
+      ).httpsCallable("loginComPin").call({
+        "pin": pinDigitado.trim(),
+        "tipo": tipo,
+        if (mesquitaId != null) "mesquitaId": mesquitaId,
+      });
 
-      if (!snapshot.exists) return false;
-
-      final pinCorreto = snapshot.value.toString();
-
-      // 2️⃣ Verificar PIN
-      if (pinDigitado.trim() != pinCorreto.trim()) return false;
-
-      // 3️⃣ PIN correcto → autenticar anonimamente para ter permissão de escrita
-      await FirebaseAuth.instance.signInAnonymously();
-
-      return true;
+      final ok = (resultado.data as Map?)?["ok"] == true;
+      if (ok) {
+        // Força um token novo, já com o claim, antes de escrever na base
+        // de dados.
+        await auth.currentUser!.getIdToken(true);
+      }
+      return ok;
+    } on FirebaseFunctionsException catch (e) {
+      print("Erro ao verificar PIN: ${e.code} ${e.message}");
+      return false;
     } catch (e) {
       print("Erro ao verificar PIN: $e");
       return false;

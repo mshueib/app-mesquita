@@ -13,7 +13,28 @@
           "package_name": "com.mosque.now"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "268973299952-8a93v84s4fc676avpqro18somh623lc4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mosque.now",
+            "certificate_hash": "03017678bb86f4f7847eb0b00b25ff5f1e9930c4"
+          }
+        },
+        {
+          "client_id": "268973299952-oe796134m3bmikjb5r6c0pneffp1ip6b.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mosque.now",
+            "certificate_hash": "911185b27ea6b0b6b507e70ec00fc526282bb99d"
+          }
+        },
+        {
+          "client_id": "268973299952-c3h4658k52jdn5ptdqdqci38qfg48p10.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCWi6Q5iGtMqY7hNDHyF9SG3pkWJ7eAD8U"
@@ -21,7 +42,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "268973299952-c3h4658k52jdn5ptdqdqci38qfg48p10.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "268973299952-mbofcj3teoqieg9pep7g0eg6l92hk9vs.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.mesquitaQuelimane"
+              }
+            }
+          ]
         }
       }
     }

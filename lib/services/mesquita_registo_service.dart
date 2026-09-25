@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -31,6 +32,12 @@ class MesquitaRegistoService {
   /// Lança [MesquitaRegistoException] se o utilizador cancelar o diálogo.
   static Future<User> entrarComGoogle() async {
     try {
+      // Sem isto, depois do primeiro login o Google reutiliza em silêncio a
+      // última conta — o utilizador nunca chega a ver a lista para escolher
+      // (ex: admin de outra mesquita no mesmo telemóvel).
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {}
       final googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         throw MesquitaRegistoException("Início de sessão com Google cancelado.");
@@ -48,6 +55,20 @@ class MesquitaRegistoService {
     } on MesquitaRegistoException {
       rethrow;
     } on FirebaseAuthException catch (e) {
+      throw MesquitaRegistoException("Erro ao entrar com Google (${e.code}).");
+    } on PlatformException catch (e) {
+      // "ApiException: 10" = DEVELOPER_ERROR: a impressão digital (SHA-1)
+      // da chave que assinou esta app não está registada no Firebase, ou
+      // o login Google não está activo em Authentication.
+      if ('${e.message}'.contains('10:') || e.code == 'sign_in_failed') {
+        throw MesquitaRegistoException(
+            "O login com Google ainda não está configurado para esta versão da app. "
+            "Contacte o administrador do MosqueNow.");
+      }
+      if (e.code == 'network_error') {
+        throw MesquitaRegistoException(
+            "Sem ligação à internet. Verifique a ligação e tente novamente.");
+      }
       throw MesquitaRegistoException("Erro ao entrar com Google (${e.code}).");
     } catch (e) {
       throw MesquitaRegistoException(
@@ -104,7 +125,12 @@ class MesquitaRegistoService {
 
     try {
       final uid = user.uid;
-      final fcmToken = await FirebaseMessaging.instance.getToken();
+      // O token só serve para avisar da aprovação — se falhar, o registo
+      // continua (antes, uma falha aqui fazia falhar o registo inteiro).
+      String? fcmToken;
+      try {
+        fcmToken = await FirebaseMessaging.instance.getToken();
+      } catch (_) {}
 
       await _db.child("mesquitas_pendentes/$uid").set({
         "status": "pendente",
@@ -224,6 +250,12 @@ class MesquitaRegistoService {
 
     // "mover": a mesquita já vive em mesquitas/{uid}, o pedido sai de pendente.
     await _db.child("mesquitas_pendentes/$uid").remove();
+  }
+
+  /// Remove de vez uma mesquita aprovada (horários, avisos, tudo). Só o
+  /// super-admin o pode fazer — as regras da base de dados garantem-no.
+  static Future<void> remover(String id) async {
+    await _db.child("mesquitas/$id").remove();
   }
 
   static Future<void> rejeitar(String uid, {String? motivo}) async {

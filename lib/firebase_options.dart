@@ -52,7 +52,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyCWi6Q5iGtMqY7hNDHyF9SG3pkWJ7eAD8U',
-    appId: '1:268973299952:android:7b6f87b347ec869cf8ca35',
+    appId: '1:268973299952:android:57e25ddcfa060fb6f8ca35',
     messagingSenderId: '268973299952',
     projectId: 'mesquita-40d71',
     storageBucket: 'mesquita-40d71.firebasestorage.app',

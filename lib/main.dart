@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -29,26 +30,41 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  print("📩 Notificação recebida (background)");
-  // se for aviso, só mostra — não reagenda
-  final tipoMsg = message.data['tipo'] ?? "";
-  if (tipoMsg == "aviso") {
-    final corpoAviso = message.data['body'];
-    if (corpoAviso == null || corpoAviso.trim().isEmpty) return;
-    await NotificationService.showNotification(
-      title: message.data['title'] ?? "📢 Novo Aviso",
-      body: corpoAviso,
-    );
-    return;
+  // As mensagens da Cloud Function trazem "notification": com a app em
+  // segundo plano o Android já a mostra sozinho — mostrá-la aqui outra
+  // vez duplicava todas as notificações. Só mostramos se vier sem ela.
+  if (message.notification == null) {
+    final corpo = message.data['body']?.toString() ?? "";
+    if (corpo.trim().isNotEmpty) {
+      await NotificationService.showNotification(
+        title: message.data['title']?.toString() ?? "🕌 MosqueNow",
+        body: corpo,
+      );
+    }
   }
-//VERIFICA PREFERÊNCIA ANTES DE AGENDAR
+
+  // Avisos não mexem nos horários.
+  if (message.data['tipo'] == "aviso") return;
+
   final ativoAzan = await LocalStorageService.alarmeAzanAtivo();
   if (!ativoAzan) return;
-  final dbRef = FirebaseDatabase.instance.ref("mesquitas/mesquita_quelimane");
 
-  final snapshot = await dbRef.get();
+  // Só reagenda se a mensagem for da mesquita cujos horários estão
+  // agendados (a seleccionada, e só se for favorita) — o tópico vem em
+  // message.from como "/topics/mesquita_<id>".
+  final selecionada = await LocalStorageService.carregarMesquitaSelecionada() ??
+      "mesquita_quelimane";
+  final favoritos = await LocalStorageService.carregarFavoritos();
+  if (!favoritos.contains(selecionada)) return;
+  final origem = message.from ?? "";
+  if (origem.startsWith("/topics/mesquita_") &&
+      origem != "/topics/mesquita_$selecionada") {
+    return;
+  }
 
-  if (!snapshot.exists) return;
+  final snapshot =
+      await FirebaseDatabase.instance.ref("mesquitas/$selecionada").get();
+  if (!snapshot.exists || snapshot.value is! Map) return;
 
   final dadosAtualizados = Map<String, dynamic>.from(snapshot.value as Map);
 
@@ -63,28 +79,20 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     "Maghrib": dadosAtualizados['maghrib_azan'],
     "Isha": dadosAtualizados['isha_azan'],
   }.entries) {
-    final nome = entry.key;
-    final horaStr = entry.value?.toString();
-
-    if (horaStr == null || !horaStr.contains(":")) continue;
-
-    final partes = horaStr.split(':');
+    final partes = entry.value?.toString().split(':') ?? const [];
+    if (partes.length != 2) continue;
+    final hora = int.tryParse(partes[0]);
+    final minuto = int.tryParse(partes[1]);
+    if (hora == null || minuto == null) continue;
 
     await NotificationService.scheduleAzan(
-      prayerName: nome,
-      hour: int.parse(partes[0]),
-      minute: int.parse(partes[1]),
-      id: NotificationService.azanIds[nome]!,
+      prayerName: entry.key,
+      hour: hora,
+      minute: minuto,
+      id: NotificationService.azanIds[entry.key]!,
       tocarSom: tocarSom,
     );
   }
-  final title = message.data['title'] ?? "🕌 Horário actualizado";
-  final body = message.data['body'] ?? "Os horários foram actualizados";
-
-  await NotificationService.showNotification(
-    title: title,
-    body: body,
-  );
 }
 
 void main() async {
@@ -105,24 +113,34 @@ void main() async {
   // 🔥 ESSENCIAL
   await NotificationService.initialize();
 
+  runApp(const OverlaySupport.global(child: MesquitaApp()));
+
+  // Depois do runApp: antes, a app ficava em ecrã branco à espera das
+  // janelas de permissão (e da rede, no pedido do FCM) antes de mostrar
+  // qualquer coisa.
+  _pedirPermissoes();
+}
+
+Future<void> _pedirPermissoes() async {
   await Permission.notification.request();
-  await Permission.scheduleExactAlarm.request();
+
+  // No Android 12, pedir esta permissão abre as Definições do sistema —
+  // fazê-lo em cada arranque, se o utilizador recusou, era irritante.
+  // Pede-se uma única vez (no Android 13+ já vem concedida pelo
+  // USE_EXACT_ALARM e isto não mostra nada).
+  if (await Permission.scheduleExactAlarm.isDenied &&
+      !await LocalStorageService.pedidoAlarmeExactoFeito()) {
+    await LocalStorageService.setPedidoAlarmeExactoFeito();
+    await Permission.scheduleExactAlarm.request();
+  }
 
   try {
+    // Notificações são por mesquita (tópico FCM por favorita) — só
+    // chegam a quem tem essa mesquita marcada como favorita.
     await FirebaseMessaging.instance.requestPermission();
-
-    await FirebaseMessaging.instance.getNotificationSettings();
-
-    FirebaseMessaging.instance.getToken().then((token) {
-      print("🔥 TOKEN: $token");
-    });
-    // 🔥 Notificações agora são por mesquita (ver _sincronizarTopicosFavoritos)
-    // — só chegam a quem tem essa mesquita marcada como favorita.
   } catch (e) {
     print("🔥 FCM offline: $e");
   }
-
-  runApp(const OverlaySupport.global(child: MesquitaApp()));
 }
 
 class MesquitaApp extends StatelessWidget {
@@ -156,6 +174,15 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  static const String _mesquitaPadrao = "mesquita_quelimane";
+  static const String _urlBaseDados =
+      'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/';
+
+  static DatabaseReference _refMesquita(String id) =>
+      FirebaseDatabase.instanceFor(
+              app: Firebase.app(), databaseURL: _urlBaseDados)
+          .ref("mesquitas/$id");
+
   String? _mesquitaSelecionada;
 
   StreamSubscription? _dbSub;
@@ -174,7 +201,6 @@ class _HomePageState extends State<HomePage> {
 
   String _proximaOracaoNome = "";
 
-  List<String> _idsAvisosNotificados = [];
   int _prioridadeAviso(String tipo) {
     switch (tipo) {
       case 'janazah':
@@ -218,13 +244,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _carregarIdsNotificados() async {
-    final ids = await LocalStorageService.carregarIdsNotificados();
-    setState(() {
-      _idsAvisosNotificados = ids;
-    });
-  }
-
   Future<void> _reagendarAzanSeNecessario() async {
     try {
       final ativoAzan = await LocalStorageService.alarmeAzanAtivo();
@@ -234,19 +253,21 @@ class _HomePageState extends State<HomePage> {
       if (dados.isEmpty) {
         // Tenta carregar do Firebase
         final snapshot = await _dbRef.get();
-        if (!snapshot.exists) return;
+        if (!snapshot.exists || snapshot.value is! Map) return;
         final dadosFirebase = Map<String, dynamic>.from(snapshot.value as Map);
 
         await NotificationService.cancelarAzan();
         await _agendarTodosAzan(dadosFirebase);
-        print("✅ Azan reagendado ao abrir (Firebase)");
+        _horariosAzanAnteriores = _horasAzan(dadosFirebase);
         return;
       }
 
       // 🔥 SE JÁ TEM DADOS EM CACHE, USA OS DADOS ACTUAIS
       await NotificationService.cancelarAzan();
       await _agendarTodosAzan(dados);
-      print("✅ Azan reagendado ao abrir (cache)");
+      // Evita que a primeira leitura da base de dados volte a agendar
+      // exactamente os mesmos horários.
+      _horariosAzanAnteriores = _horasAzan(dados);
     } catch (e) {
       print("❌ Erro ao reagendar azan: $e");
     }
@@ -263,6 +284,11 @@ class _HomePageState extends State<HomePage> {
 
   List<String> _favoritos = [];
 
+  // O agendamento do Azan depende dos favoritos — sem esperar por isto,
+  // o reagendamento ao abrir a app via a lista ainda vazia e cancelava
+  // todos os alarmes.
+  late final Future<void> _favoritosCarregados;
+
   Future<void> _carregarFavoritos() async {
     var favs = await LocalStorageService.carregarFavoritos();
 
@@ -278,15 +304,45 @@ class _HomePageState extends State<HomePage> {
       _favoritos = favs;
     });
 
-    if (_favoritos.isNotEmpty) {
-      _mesquitaSelecionada = _favoritos.first;
-    }
+    // Abre na última mesquita escolhida; senão na primeira favorita.
+    _mesquitaSelecionada =
+        await LocalStorageService.carregarMesquitaSelecionada() ??
+            (_favoritos.isNotEmpty ? _favoritos.first : _mesquitaPadrao);
 
     // Reconfirma as subscrições FCM em cada arranque (subscribeToTopic
     // é idempotente e não sobrevive garantidamente a reinstalações).
     for (final id in _favoritos) {
       NotificationService.subscreverMesquita(id);
     }
+  }
+
+  void _abrirDaNotificacao(RemoteMessage message) {
+    if (message.data['tipo'] != "aviso") return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _pageController.hasClients) {
+        _pageController.jumpToPage(1); // separador "Avisos"
+      }
+    });
+  }
+
+  /// Passa a mostrar outra mesquita. A escolha fica guardada (a app volta
+  /// a abrir nela) e os alarmes de Azan são reagendados pelo
+  /// [_ouvirNuvem] assim que chegam os dados — incluindo quando a
+  /// mesquita ainda não tem dados, sem rebentar.
+  Future<void> _mudarMesquita(String id) async {
+    setState(() {
+      _mesquitaSelecionada = id;
+      _dbRef = _refMesquita(id);
+      dados = {};
+      _listaAvisos = [];
+    });
+    // Força a "primeira carga" em _verificarEReagendarAzan.
+    _horariosAzanAnteriores = {};
+    await LocalStorageService.salvarMesquitaSelecionada(id);
+    try {
+      _dbRef.keepSynced(true);
+    } catch (_) {}
+    _ouvirNuvem();
   }
 
   Future<void> _toggleFavorito(String id) async {
@@ -310,31 +366,27 @@ class _HomePageState extends State<HomePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _verificarVersaoMinima();
     });
-    _carregarFavoritos();
-    _mesquitaSelecionada = "mesquita_quelimane";
+    _mesquitaSelecionada = _mesquitaPadrao;
+    // Referência provisória só para o primeiro build — a mesquita
+    // verdadeira (última escolhida) só se sabe depois de ler as
+    // preferências, e só aí começamos a ouvir a base de dados.
+    _dbRef = _refMesquita(_mesquitaPadrao);
     _pageController = PageController();
     _carregarCacheInicial();
-    _carregarIdsNotificados();
     _verificarInternetInicial();
 
-    try {
-      _dbRef = FirebaseDatabase.instanceFor(
-        app: Firebase.app(),
-        databaseURL:
-            'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/',
-      ).ref(_mesquitaSelecionada != null
-          ? "mesquitas/$_mesquitaSelecionada"
-          : "app");
-
-      _dbRef.keepSynced(true); // PARA OFFLINE
-
-      _ouvirNuvem();
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
+    _favoritosCarregados = _carregarFavoritos();
+    _favoritosCarregados.then((_) async {
+      if (!mounted) return;
+      setState(() => _dbRef = _refMesquita(_mesquitaSelecionada!));
+      try {
+        _dbRef.keepSynced(true); // PARA OFFLINE
+        _ouvirNuvem();
         await _reagendarAzanSeNecessario();
-      });
-    } catch (e) {
-      print("🔥 Firebase indisponível (modo offline): $e");
-    }
+      } catch (e) {
+        print("🔥 Firebase indisponível (modo offline): $e");
+      }
+    });
     _connectivitySubscription =
         Connectivity().onConnectivityChanged.listen((result) {
       bool estaOnline = result != ConnectivityResult.none;
@@ -364,7 +416,8 @@ class _HomePageState extends State<HomePage> {
       final tipoMsg = message.data['tipo'] ?? "";
 
       if (tipoMsg == "aviso") {
-        // FCM de aviso — só mostra notificação
+        // FCM de aviso — só mostra notificação (se o utilizador as quiser)
+        if (!await LocalStorageService.notificacoesAvisosAtivos()) return;
         final corpoAviso = message.notification?.body ?? message.data['body'];
         if (corpoAviso == null || corpoAviso.trim().isEmpty) return;
         await NotificationService.showNotification(
@@ -389,8 +442,11 @@ class _HomePageState extends State<HomePage> {
         );
       }
     });
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      print("📲 Notificação clicada");
+    // Tocar numa notificação de aviso abre directamente o separador
+    // Avisos — com a app em segundo plano ou fechada.
+    FirebaseMessaging.onMessageOpenedApp.listen(_abrirDaNotificacao);
+    FirebaseMessaging.instance.getInitialMessage().then((message) {
+      if (message != null) _abrirDaNotificacao(message);
     });
 
     /*_pulseController = AnimationController(
@@ -438,7 +494,12 @@ class _HomePageState extends State<HomePage> {
       final value = event.snapshot.value;
 
       if (value == null || value is! Map) {
-        print("⚠️ Nenhum dado novo - mantendo cache");
+        // A mesquita seleccionada deixou de existir (ex: removida pelo
+        // super-admin) — volta à mesquita padrão em vez de ficar com o
+        // ecrã inicial vazio.
+        if (value == null && _mesquitaSelecionada != _mesquitaPadrao) {
+          _mudarMesquita(_mesquitaPadrao);
+        }
         return;
       }
 
@@ -449,8 +510,18 @@ class _HomePageState extends State<HomePage> {
       if (dadosMap['avisos'] != null && dadosMap['avisos'] is Map) {
         final avisosMap = Map<String, dynamic>.from(dadosMap['avisos']);
 
+        // Avisos cujo prazo ("yyyy-MM-dd") já passou deixam de aparecer —
+        // continuam visíveis durante o próprio dia do prazo. Sem prazo,
+        // ficam até o admin os apagar.
+        final agora = DateTime.now();
+        final hoje = "${agora.year.toString().padLeft(4, '0')}-"
+            "${agora.month.toString().padLeft(2, '0')}-"
+            "${agora.day.toString().padLeft(2, '0')}";
+
         avisosMap.forEach((key, v) {
-          if (v is Map) {
+          final prazo = v is Map ? (v['prazo']?.toString() ?? '') : '';
+          final expirado = prazo.isNotEmpty && prazo.compareTo(hoje) < 0;
+          if (v is Map && !expirado) {
             avisosTemp.add({
               'id': key,
               'tipo': v['tipo'] ?? 'geral',
@@ -470,8 +541,6 @@ class _HomePageState extends State<HomePage> {
       if (dadosMap['sehri'] != null) {
         dadosMap['suhoor'] = dadosMap['sehri'];
       }
-      // 🔥 AQUI ESTÁ A CORREÇÃO
-      _verificarNovoAviso(avisosTemp);
       // _verificarMudancaHorarios(dadosMap);
       // _verificarMudancaJammah(dadosMap);
 
@@ -554,6 +623,7 @@ class _HomePageState extends State<HomePage> {
     // Alarme de azan só toca para mesquitas marcadas como favoritas —
     // mesmo comportamento que os avisos/alterações de horário já têm
     // via subscrição a tópico em _toggleFavorito.
+    await _favoritosCarregados;
     if (_mesquitaSelecionada == null ||
         !_favoritos.contains(_mesquitaSelecionada)) {
       await NotificationService.cancelarAzan();
@@ -611,6 +681,7 @@ class _HomePageState extends State<HomePage> {
     if (!ativoAzan) return;
 
     // Alarme de azan só toca para mesquitas marcadas como favoritas.
+    await _favoritosCarregados;
     if (_mesquitaSelecionada == null ||
         !_favoritos.contains(_mesquitaSelecionada)) {
       await NotificationService.cancelarAzan();
@@ -674,63 +745,28 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// Só as horas de Azan contam — são as únicas que geram alarmes.
+  static Map<String, String> _horasAzan(Map<String, dynamic> dadosMap) => {
+        for (final chave in const [
+          'fajr_azan',
+          'dhuhr_azan',
+          'asr_azan',
+          'maghrib_azan',
+          'isha_azan',
+        ])
+          chave: dadosMap[chave]?.toString() ?? "",
+      };
+
+  /// Reagenda os alarmes só quando as horas de Azan mudam de facto. Cada
+  /// actualização da mesquita (avisos, Iqamah, mês islâmico...) dispara
+  /// este listener — antes, ao abrir a app, os alarmes eram agendados duas
+  /// vezes seguidas (cache + primeira leitura da base de dados).
   Future<void> _verificarEReagendarAzan(Map<String, dynamic> dadosMap) async {
-    final novosHorarios = {
-      "Fajr_azan": dadosMap['fajr_azan']?.toString() ?? "",
-      "Fajr_iqamah": dadosMap['fajr_namaz']?.toString() ?? "",
-      "Dhuhr_azan": dadosMap['dhuhr_azan']?.toString() ?? "",
-      "Dhuhr_iqamah": dadosMap['dhuhr_namaz']?.toString() ?? "",
-      "Asr_azan": dadosMap['asr_azan']?.toString() ?? "",
-      "Asr_iqamah": dadosMap['asr_namaz']?.toString() ?? "",
-      "Maghrib_azan": dadosMap['maghrib_azan']?.toString() ?? "",
-      "Maghrib_iqamah": dadosMap['maghrib_namaz']?.toString() ?? "",
-      "Isha_azan": dadosMap['isha_azan']?.toString() ?? "",
-      "Isha_iqamah": dadosMap['isha_namaz']?.toString() ?? "",
-    };
-    // sair se nenhum horário tem valor
-    // evita notificação falsa ao mudar avisos
-    bool algumHorarioValido = novosHorarios.values.any((v) => v.isNotEmpty);
-    if (!algumHorarioValido) return;
-    bool houveAlteracao = false;
-    String? oracao;
-    String? tipo;
-    String? novoHorario;
+    final novas = _horasAzan(dadosMap);
+    if (novas.values.every((v) => v.isEmpty)) return;
+    if (mapEquals(novas, _horariosAzanAnteriores)) return;
 
-    for (var entry in novosHorarios.entries) {
-      if (entry.value.isEmpty) continue;
-      if (_horariosAzanAnteriores[entry.key] != entry.value) {
-        houveAlteracao = true;
-
-        final partes = entry.key.split("_");
-        oracao = partes[0];
-        tipo = partes[1] == "azan" ? "Azan" : "Iqamah";
-        novoHorario = entry.value;
-
-        break;
-      }
-    }
-
-    if (_horariosAzanAnteriores.isEmpty) {
-      print("🚀 Primeira carga — agendar tudo");
-
-      await NotificationService.cancelarAzan();
-      await _agendarTodosAzan(dadosMap);
-
-      _horariosAzanAnteriores = novosHorarios;
-      return;
-    }
-
-    if (!houveAlteracao) return;
-    // 🔥 NOVO — NOTIFICAR MUDANÇA
-    /*await NotificationService.showNotification(
-      title: "🕌 Horário actualizado",
-      body: (oracao != null && tipo != null && novoHorario != null)
-          ? "$oracao ($tipo) → $novoHorario"
-          : "Os horários foram actualizados",
-    );*/
-
-    _horariosAzanAnteriores = novosHorarios;
-
+    _horariosAzanAnteriores = novas;
     await NotificationService.cancelarAzan();
     await _agendarTodosAzan(dadosMap);
   }
@@ -746,32 +782,6 @@ class _HomePageState extends State<HomePage> {
           "${data.minute.toString().padLeft(2, '0')}";
     } catch (e) {
       return "";
-    }
-  }
-
-  void _verificarNovoAviso(List<Map<String, dynamic>> novosAvisos) async {
-    bool houveNovo = false;
-
-    for (var aviso in novosAvisos) {
-      String id = aviso['id'];
-
-      if (!_idsAvisosNotificados.contains(id)) {
-        final ativoAvisos =
-            await LocalStorageService.notificacoesAvisosAtivos();
-        if (ativoAvisos) {
-          NotificationService.showNotification(
-            title: "📢 Novo Aviso",
-            body: aviso['texto'] ?? "",
-          );
-        }
-        _idsAvisosNotificados.add(id);
-        houveNovo = true;
-      }
-    }
-
-    // 🔥 Só guarda se houve aviso novo — evita escritas desnecessárias
-    if (houveNovo) {
-      await LocalStorageService.salvarIdsNotificados(_idsAvisosNotificados);
     }
   }
 
@@ -833,8 +843,8 @@ class _HomePageState extends State<HomePage> {
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 250),
                     curve: Curves.easeInOut,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
                       color: selecionado
                           ? const Color(0xFF0B3D2E)
@@ -905,9 +915,10 @@ class _HomePageState extends State<HomePage> {
             );
           },
         ),
-        title: const Text(
-          "Masjid Central: Quelimane",
-          style: TextStyle(
+        // Nome da mesquita seleccionada (campo "nome" na base de dados).
+        title: Text(
+          dados['nome']?.toString() ?? "MosqueNow",
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 19,
           ),
@@ -941,20 +952,7 @@ class _HomePageState extends State<HomePage> {
                     context,
                     MaterialPageRoute(
                       builder: (_) => MesquitasPage(
-                        onSelecionar: (id) async {
-                          setState(() {
-                            _mesquitaSelecionada = id;
-                            _dbRef = FirebaseDatabase.instanceFor(
-                              app: Firebase.app(),
-                              databaseURL:
-                                  'https://mesquita-40d71-default-rtdb.europe-west1.firebasedatabase.app/',
-                            ).ref("mesquitas/$id");
-                          });
-                          _ouvirNuvem();
-                          await NotificationService.cancelarAzan();
-                          await _agendarTodosAzan(await _dbRef.get().then((e) =>
-                              Map<String, dynamic>.from(e.value as Map)));
-                        },
+                        onSelecionar: _mudarMesquita,
                       ),
                     ),
                   );
@@ -1339,8 +1337,7 @@ class _HomePageState extends State<HomePage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.nights_stay,
-                  size: 18, color: Color(0xFFB8860B)),
+              const Icon(Icons.nights_stay, size: 18, color: Color(0xFFB8860B)),
               const SizedBox(width: 8),
               Text(
                 "${dados['mes_islamico'] ?? 'RAMADHAN'} ${dados['ano_islamico'] ?? '1447'}",
@@ -1690,6 +1687,8 @@ class _CountdownCardState extends State<CountdownCard>
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.03).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
+    // Pulsação contínua — o custo fica contido pelos RepaintBoundary no
+    // build(): sem eles, cada frame redesenhava a página inicial inteira.
     _pulseController.repeat(reverse: true);
 
     _calcular();
@@ -1707,95 +1706,69 @@ class _CountdownCardState extends State<CountdownCard>
     super.dispose();
   }
 
+  /// "HH:MM" → hoje a essa hora; null se o valor não for uma hora válida
+  /// (ex: "--:--" nas mesquitas acabadas de aprovar).
+  DateTime? _horaHoje(dynamic valor, DateTime agora, {int diasAMais = 0}) {
+    final partes = valor?.toString().split(':') ?? const [];
+    if (partes.length != 2) return null;
+    final h = int.tryParse(partes[0]);
+    final m = int.tryParse(partes[1]);
+    if (h == null || m == null) return null;
+    return DateTime(agora.year, agora.month, agora.day + diasAMais, h, m);
+  }
+
   void _calcular() {
     if (widget.dados.isEmpty) return;
-    DateTime agora = DateTime.now();
-    final oracoes = [
-      {
-        "nome": "Fajr",
-        "azan": widget.dados['fajr_azan'],
-        "iqamah": widget.dados['fajr_namaz']
-      },
-      {
-        "nome": "Zohr",
-        "azan": widget.dados['dhuhr_azan'],
-        "iqamah": widget.dados['dhuhr_namaz']
-      },
-      {
-        "nome": "Asr",
-        "azan": widget.dados['asr_azan'],
-        "iqamah": widget.dados['asr_namaz']
-      },
-      {
-        "nome": "Maghrib",
-        "azan": widget.dados['maghrib_azan'],
-        "iqamah": widget.dados['maghrib_namaz']
-      },
-      {
-        "nome": "Isha",
-        "azan": widget.dados['isha_azan'],
-        "iqamah": widget.dados['isha_namaz']
-      },
+    final agora = DateTime.now();
+    const oracoes = [
+      ("Fajr", 'fajr_azan', 'fajr_namaz'),
+      ("Zohr", 'dhuhr_azan', 'dhuhr_namaz'),
+      ("Asr", 'asr_azan', 'asr_namaz'),
+      ("Maghrib", 'maghrib_azan', 'maghrib_namaz'),
+      ("Isha", 'isha_azan', 'isha_namaz'),
     ];
+
     String prox = "";
     DateTime? proxHora;
 
-    for (var o in oracoes) {
-      final azanStr = o['azan']?.toString();
-      final iqamahStr = o['iqamah']?.toString();
-
-      if (azanStr == null || iqamahStr == null) continue;
-      if (!azanStr.contains(':') || !iqamahStr.contains(':')) continue;
-
-      final azanPartes = azanStr.split(':');
-      final iqamahPartes = iqamahStr.split(':');
-
-      if (azanPartes.length != 2 || iqamahPartes.length != 2) continue;
-
-      final azan = DateTime(
-        agora.year,
-        agora.month,
-        agora.day,
-        int.parse(azanPartes[0]),
-        int.parse(azanPartes[1]),
-      );
-
-      final iqamah = DateTime(
-        agora.year,
-        agora.month,
-        agora.day,
-        int.parse(iqamahPartes[0]),
-        int.parse(iqamahPartes[1]),
-      );
+    for (final (nome, chaveAzan, chaveIqamah) in oracoes) {
+      final azan = _horaHoje(widget.dados[chaveAzan], agora);
+      if (azan == null) continue;
 
       // 🔥 ANTES DO AZAN
       if (agora.isBefore(azan)) {
-        prox = "Azan ${o['nome']}";
+        prox = "Azan $nome";
         proxHora = azan;
         break;
       }
 
-      // 🔥 ENTRE AZAN E IQAMAH
-      if (agora.isBefore(iqamah)) {
-        prox = "Iqamah ${o['nome']}";
+      // 🔥 ENTRE AZAN E IQAMAH (o Maghrib muitas vezes não tem Iqamah)
+      final iqamah = _horaHoje(widget.dados[chaveIqamah], agora);
+      if (iqamah != null && agora.isBefore(iqamah)) {
+        prox = "Iqamah $nome";
         proxHora = iqamah;
         break;
       }
     }
-    if (proxHora == null) {
-      final fajrStr = widget.dados['fajr_azan'] ?? "04:30";
-      final p = fajrStr.split(':');
 
+    // Depois do Isha: Fajr de amanhã.
+    if (proxHora == null) {
+      proxHora = _horaHoje(widget.dados['fajr_azan'], agora, diasAMais: 1);
       prox = "Azan Fajr";
-      proxHora = DateTime(
-        agora.year,
-        agora.month,
-        agora.day + 1,
-        int.parse(p[0]),
-        int.parse(p[1]),
-      );
     }
-    Duration diff = proxHora.difference(agora);
+
+    if (proxHora == null) {
+      // Mesquita sem horários definidos ainda.
+      setState(() {
+        _proximaOracaoNome = "Horários por definir";
+        _proximaOracaoHora = "--:--";
+        _tempoRestante = "";
+      });
+      _avisarMudanca("");
+      return;
+    }
+
+    final diff = proxHora.difference(agora);
     setState(() {
       _proximaOracaoNome = prox;
       _proximaOracaoHora =
@@ -1803,58 +1776,73 @@ class _CountdownCardState extends State<CountdownCard>
       _tempoRestante =
           "${diff.inHours}h ${diff.inMinutes % 60}m ${diff.inSeconds % 60}s";
     });
-    if (mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          widget.onProximaOracaoChanged?.call(prox);
-        }
-      });
-    }
+    _avisarMudanca(prox);
+  }
+
+  // Só avisa o ecrã principal quando a próxima oração muda — antes era a
+  // cada segundo, o que reconstruía a página inicial inteira sem razão.
+  String? _ultimaAvisada;
+
+  void _avisarMudanca(String prox) {
+    if (prox == _ultimaAvisada) return;
+    _ultimaAvisada = prox;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onProximaOracaoChanged?.call(prox);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: _pulseAnimation,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF0B3D2E), Color(0xFF1E6B3C)],
+    // RepaintBoundary por fora: a animação não obriga a redesenhar o resto
+    // da página inicial. Por dentro: o conteúdo do cartão fica em cache e
+    // cada frame só aplica a escala (só é redesenhado 1x por segundo,
+    // quando o contador muda).
+    return RepaintBoundary(
+      child: ScaleTransition(
+        scale: _pulseAnimation,
+        child: RepaintBoundary(
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF0B3D2E), Color(0xFF1E6B3C)],
+              ),
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Column(
+              children: [
+                const Text(
+                  "Próxima Oração",
+                  style: TextStyle(color: Colors.white70, fontSize: 16),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _proximaOracaoNome,
+                  style: const TextStyle(
+                    color: Color(0xFFD4AF37),
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _proximaOracaoHora,
+                  style: const TextStyle(
+                    color: Color(0xFFD4AF37),
+                    fontSize: 44,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                if (_tempoRestante.isNotEmpty)
+                  Text(
+                    "Faltam $_tempoRestante",
+                    style: const TextStyle(color: Colors.white),
+                  ),
+              ],
+            ),
           ),
-          borderRadius: BorderRadius.circular(22),
-        ),
-        child: Column(
-          children: [
-            const Text(
-              "Próxima Oração",
-              style: TextStyle(color: Colors.white70, fontSize: 16),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _proximaOracaoNome,
-              style: const TextStyle(
-                color: Color(0xFFD4AF37),
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _proximaOracaoHora,
-              style: const TextStyle(
-                color: Color(0xFFD4AF37),
-                fontSize: 44,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              "Faltam $_tempoRestante",
-              style: const TextStyle(color: Colors.white),
-            ),
-          ],
         ),
       ),
     );

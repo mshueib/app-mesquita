@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import '../services/auth_service.dart';
 import '../services/mesquita_registo_service.dart';
 
 class AdminLoginPage extends StatefulWidget {
   final VoidCallback onSuccess;
-  final Future<bool> Function(String pin)? loginFn;
+  final Future<bool> Function(String pin) loginFn;
   final String titulo;
 
   /// Quando true, mostra também a opção de entrar com o username/senha
@@ -18,7 +17,7 @@ class AdminLoginPage extends StatefulWidget {
   const AdminLoginPage({
     super.key,
     required this.onSuccess,
-    this.loginFn,
+    required this.loginFn,
     this.titulo = "Acesso Administrativo",
     this.mostrarLoginMesquita = false,
     this.onSuccessMesquita,
@@ -56,7 +55,7 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
       _erro = "";
     });
 
-    final loginFn = widget.loginFn ?? AuthService.login;
+    final loginFn = widget.loginFn;
     bool sucesso = await loginFn(_pinController.text.trim());
 
     setState(() => _loading = false);
@@ -202,7 +201,8 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF0B3D2E),
             padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
           child: _loading
               ? const CircularProgressIndicator(color: Colors.white)
@@ -247,7 +247,8 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
             foregroundColor: const Color(0xFF0B3D2E),
             side: const BorderSide(color: Color(0xFF0B3D2E)),
             padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       ),
@@ -256,7 +257,8 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
         Text(
           _erroMesquita,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w500),
+          style:
+              const TextStyle(color: Colors.red, fontWeight: FontWeight.w500),
         ),
     ];
   }

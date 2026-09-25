@@ -1,0 +1,51 @@
+{
+  // Quem pode escrever:
+  //  - super-admin: custom claim "superAdmin" (PIN verificado pela Cloud
+  //    Function loginComPin);
+  //  - admin de uma mesquita por PIN: custom claim "mesquita" == id;
+  //  - dono de uma mesquita auto-registada: login Google, uid == id da
+  //    mesquita (só depois de aprovada — a aprovação é que cria o nó).
+  // A Cloud Function (Admin SDK) ignora estas regras.
+  "rules": {
+    // Dados antigos (versão de uma só mesquita) + versão mínima + triggers
+    // de notificação. Leitura pública; nada de segredos aqui dentro.
+    "app": {
+      ".read": true,
+      ".write": "auth != null && auth.token.superAdmin === true",
+      "triggers": {
+        "$mesquitaId": {
+          // COMPAT APK ANTIGO: "|| (auth != null && $mesquitaId === 'mesquita_quelimane')"
+          // — remover quando a versão nova (login por PIN no servidor)
+          // estiver publicada e os admins a tiverem instalado.
+          ".write": "auth != null && (auth.token.superAdmin === true || auth.token.mesquita === $mesquitaId || auth.uid === $mesquitaId || $mesquitaId === 'mesquita_quelimane')"
+        }
+      }
+    },
+
+    "mesquitas": {
+      ".read": true,
+      "$mesquitaId": {
+        // COMPAT APK ANTIGO: "|| $mesquitaId === 'mesquita_quelimane'" — a
+        // app antiga compara o PIN (app/admin_pin, público) no telemóvel e
+        // só faz login anónimo antes de escrever. Remover com o acima.
+        ".write": "auth != null && (auth.token.superAdmin === true || auth.token.mesquita === $mesquitaId || (auth.uid === $mesquitaId && data.exists() && newData.exists()) || $mesquitaId === 'mesquita_quelimane')"
+      }
+    },
+
+    "mesquitas_pendentes": {
+      ".read": "auth != null && auth.token.superAdmin === true",
+      ".write": "auth != null && auth.token.superAdmin === true",
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        // O próprio requerente só pode criar/repetir o pedido como "pendente".
+        ".write": "auth != null && auth.uid === $uid && newData.exists() && newData.child('status').val() === 'pendente'"
+      }
+    },
+
+    // PINs e contadores de tentativas — só a Cloud Function lhes acede.
+    "privado": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}

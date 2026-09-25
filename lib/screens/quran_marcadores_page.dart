@@ -49,7 +49,7 @@ class _QuranMarcadoresPageState extends State<QuranMarcadoresPage> {
               child: Padding(
                 padding: EdgeInsets.all(32),
                 child: Text(
-                  "Ainda não tens marcadores.\nToca no ícone de marcador junto a um versículo para guardar aqui.",
+                  "Ainda não tens marcadores.\nDurante a leitura, toca no ícone de marcador no topo para guardar a página aqui.",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.black54),
                 ),
@@ -82,16 +82,14 @@ class _QuranMarcadoresPageState extends State<QuranMarcadoresPage> {
                     m.nome,
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  subtitle: Text("${m.surahNome} — versículo ${m.ayah}"),
+                  subtitle: Text("Juz ${m.juz} — página ${m.pagina}"),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    final sura = QuranService.porNumero(m.surah);
-                    if (sura == null) return;
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) =>
-                            SurahPage(sura: sura, ayahInicial: m.ayah),
+                            JuzReaderPage(juz: m.juz, paginaInicial: m.pagina),
                       ),
                     );
                   },

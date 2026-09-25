@@ -5,6 +5,7 @@ import 'admin_login_page.dart';
 import 'admin_panel_page.dart';
 import 'developer_page.dart';
 import 'pedidos_page.dart';
+import '../services/auth_service.dart';
 import '../services/mesquita_registo_service.dart';
 
 /// Menu "Mais" — reúne Admin, Super Admin e Sobre numa única aba.
@@ -192,6 +193,9 @@ class _AdminGatewayPageState extends State<AdminGatewayPage> {
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: AdminLoginPage(
+        // O PIN dá acesso à mesquita que está aberta no ecrã inicial.
+        loginFn: (pin) =>
+            AuthService.login(pin, mesquitaId: widget.dbRef.key!),
         mostrarLoginMesquita: true,
         onSuccessMesquita: _entrarComoAdminDaMesquita,
         onSuccess: () => setState(() => _autenticado = true),

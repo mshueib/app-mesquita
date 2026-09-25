@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:intl/intl.dart';
+import 'package:timezone/timezone.dart' as tz;
 import '../services/auth_service.dart';
 
 class AdminPanelPage extends StatefulWidget {
@@ -198,6 +199,22 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     });
   }
 
+  /// Data (yyyy-MM-dd, hora de Maputo) do dia islâmico em curso — igual
+  /// ao "diaEfetivo" da Cloud Function incrementarDiaIslamico: hoje se o
+  /// Maghrib já passou, senão ontem.
+  String _diaEfetivoIslamico(String? maghrib) {
+    final agora = tz.TZDateTime.now(tz.getLocation('Africa/Maputo'));
+    final partes = maghrib?.split(':') ?? const [];
+    final h = partes.length == 2 ? int.tryParse(partes[0]) : null;
+    final m = partes.length == 2 ? int.tryParse(partes[1]) : null;
+
+    final jaPassouMaghrib = h != null &&
+        m != null &&
+        (agora.hour > h || (agora.hour == h && agora.minute >= m));
+    final dia = jaPassouMaghrib ? agora : agora.subtract(const Duration(days: 1));
+    return DateFormat('yyyy-MM-dd').format(dia);
+  }
+
   Future<void> _gravar() async {
     // 🔥 VALIDAR AZAN vs IQAMAH
 
@@ -239,11 +256,21 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     // 🔥 ADICIONE ESTA LINHA
     dados['ultima_atualizacao_salat'] = DateTime.now().toIso8601String();
 
-    // impede que _verificarMudancaDeDia() incremente o dia automaticamente
-    final agora = DateTime.now();
-    dados['ultima_data_jejum'] = "${agora.year.toString().padLeft(4, '0')}-"
-        "${agora.month.toString().padLeft(2, '0')}-"
-        "${agora.day.toString().padLeft(2, '0')}";
+    // Só actualiza a baseline do contador quando o admin altera o "Dia"
+    // manualmente — a Cloud Function incrementarDiaIslamico usa este campo
+    // para saber quantos dias já passaram desde a última actualização, com
+    // base na hora do Maghrib em Maputo. Se carimbássemos aqui a data actual
+    // em qualquer gravação (ex: só mudar o mês ou os horários), a função
+    // deixa de conseguir contabilizar o dia seguinte correctamente.
+    //
+    // A data tem de seguir a mesma regra da função: antes do Maghrib (hora
+    // de Maputo) o dia islâmico ainda é o de "ontem". Se gravássemos
+    // sempre a data de hoje, um "Dia" alterado de manhã só avançava no
+    // Maghrib do dia seguinte — com um dia de atraso.
+    if (dados['jejum'] != (_valoresAntigos['jejum'] ?? "")) {
+      dados['ultima_data_jejum'] =
+          _diaEfetivoIslamico(dados['maghrib_azan']?.toString());
+    }
 
     await widget.dbRef.update(dados);
     final idMesquita = widget.dbRef.key;
@@ -399,9 +426,27 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
       backgroundColor: const Color(0xFFF4F1EA),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0B3D2E),
-        title: const Text(
-          "Painel Administrativo",
-          style: TextStyle(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
+        // Nome da mesquita em destaque — o admin vê sempre qual está a
+        // editar (o PIN dá acesso à mesquita aberta no ecrã inicial).
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.dadosAtuais['nome']?.toString() ?? "Mesquita",
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const Text(
+              "Painel Administrativo",
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ],
         ),
         actions: [
           IconButton(

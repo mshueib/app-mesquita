@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/local_storage_service.dart';
+import 'package:azan_player/azan_player.dart';
 import '../services/notification_service.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -13,7 +14,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _notifHorarios = true;
   bool _notifAvisos = true;
   bool _alarmeAzan = true;
-  bool _tocarSomAzan = false;
+  bool _tocarSomAzan = true;
 
   @override
   void initState() {
@@ -129,10 +130,25 @@ class _SettingsPageState extends State<SettingsPage> {
               Icons.notifications_active_outlined, _alarmeAzan, _toggleAzan),
           _tile(
               "Tocar o som do Azan",
-              "Por padrão só aparece a notificação; active para tocar o Azan",
+              "Toca o Azan pelo volume de alarme. Não toca com o telemóvel em modo silencioso ou vibrar. Para parar: \"Parar Azan\" ou uma tecla de volume",
               Icons.volume_up_outlined,
               _tocarSomAzan,
               _toggleSomAzan),
+          if (_tocarSomAzan)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: OutlinedButton.icon(
+                onPressed: () => AzanPlayer.testar(nome: "Teste"),
+                icon: const Icon(Icons.play_arrow, color: Color(0xFF0B3D2E)),
+                label: const Text(
+                  "Testar o Azan agora",
+                  style: TextStyle(color: Color(0xFF0B3D2E)),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFF0B3D2E)),
+                ),
+              ),
+            ),
         ],
       ),
     );
